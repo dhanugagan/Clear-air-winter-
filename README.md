@@ -20,19 +20,25 @@ ClearAir Winter is a full-stack GenAI-powered assistant designed to help familie
 ## Architecture
 
 ```text
-├── server.ts                         # Full-stack Express + Vite server entry point (port 3000)
+├── server.ts                         # Full-stack Express + Vite server entry point (port 3000) + graceful shutdown
+├── eslint.config.js                  # Strict ESLint + TypeScript + React Hooks + jsx-a11y rules
 ├── server/
 │   ├── app.ts                        # Express router, security headers, rate limiter, DI support
 │   └── services/
 │       ├── airQualityService.ts      # Open-Meteo integration + bounded TtlCache
-│       └── geminiService.ts          # Server-side @google/genai client with responseSchema & retries
+│       └── geminiService.ts          # Server-side @google/genai client with schema & runtime sanitization
 ├── src/
-│   ├── shared/airQuality.ts          # Strict domain physics, diagnostics, safety matrix, & validators
+│   ├── shared/
+│   │   ├── types.ts                  # Core domain TypeScript interfaces & contracts
+│   │   ├── airPhysics.ts             # AQI classification, inversion model, diagnostics, & impact math
+│   │   ├── validation.ts             # Input/snapshot sanitization, allowlist validation, & bounds clamping
+│   │   └── airQuality.ts             # Unified domain module barrel export
 │   ├── services/apiClient.ts         # Typed frontend fetch client with AbortSignal support
 │   ├── components/
 │   │   ├── ErrorBoundary.tsx         # Resilient React error boundary
 │   │   ├── TopNav.tsx                # 3-zone accessible navigation header + mobile disclosure
-│   │   ├── HeroTelemetry.tsx         # City search, GPS, Severe Smog Drill, & live metrics
+│   │   ├── TelemetryMetricStrip.tsx  # Modular AQI, PM2.5, thermal inversion, & ventilation metrics
+│   │   ├── HeroTelemetry.tsx         # City search, GPS, Severe Smog Drill, & live telemetry deck
 │   │   ├── FamilySafetyMatrix.tsx    # Immediate outdoor, masking, window, & filtration directives
 │   │   ├── SmogTimelineChart.tsx     # Keyboard-navigable 24h dispersion curve with Motion animations
 │   │   ├── HouseholdConfigurator.tsx # Household profile form & live emission diagnostic strip
@@ -45,7 +51,8 @@ ClearAir Winter is a full-stack GenAI-powered assistant designed to help familie
 └── tests/
     ├── airQuality.test.ts            # Unit tests for physics, diagnostics, safety matrix, & sanitization
     ├── api.test.ts                   # Express route, security header, rate limiter, & cache tests
-    ├── services.test.ts              # Open-Meteo service parsing, caching, & Gemini key guard tests
+    ├── apiClient.test.ts             # Frontend HTTP client & error-fallback unit tests
+    ├── services.test.ts              # Open-Meteo parsing, caching, Gemini sanitization & retry tests
     └── components.test.tsx           # React Testing Library UI, keyboard a11y, & ErrorBoundary tests
 ```
 
@@ -54,13 +61,13 @@ ClearAir Winter is a full-stack GenAI-powered assistant designed to help familie
 ## Engineering Standards
 
 ### Code Quality
-- Strict TypeScript (`"strict": true`, `"noUnusedLocals": true`, `"noUnusedParameters": true`) across client, server, and shared modules.
-- Clean separation of concerns: pure domain physics (`src/shared/airQuality.ts`), typed HTTP client (`src/services/apiClient.ts`), backend services (`server/services/*`), modular React components (`ActionChoiceCard`, `CommunityMultiplierPanel`, `FamilySafetyMatrix`), and resilient `ErrorBoundary`.
+- Strict TypeScript (`"strict": true`, `"noUnusedLocals": true`, `"noUnusedParameters": true`) plus ESLint (`@eslint/js`, `typescript-eslint`, `eslint-plugin-react-hooks`, `eslint-plugin-jsx-a11y`) across client, server, and test suites.
+- Clean separation of concerns: split shared domain modules (`src/shared/types.ts`, `airPhysics.ts`, `validation.ts`), typed HTTP client (`src/services/apiClient.ts`), backend services (`server/services/*`), modular React components (`TelemetryMetricStrip`, `ActionChoiceCard`, `CommunityMultiplierPanel`, `FamilySafetyMatrix`), and resilient `ErrorBoundary`.
 
 ### Security
 - **Server-Side AI Execution**: All `@google/genai` calls execute strictly on the Express backend; `GEMINI_API_KEY` is never exposed to client bundles.
-- **Validation & Sanitization**: Allowlist regexes, enum validation, length limits, coordinate bounds, and HTML/control-character stripping on every endpoint.
-- **Abuse & Header Hardening**: `32kb` JSON body limit, sliding-window AI endpoint rate limiter (`429`), disabled `x-powered-by`, and `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, and `Permissions-Policy` headers.
+- **Validation & Sanitization**: Allowlist regexes, enum validation, length limits, coordinate bounds, `sanitizeAirQualitySnapshot` request clamping, runtime Gemini output sanitization (`sanitizeActionPlanPayload`, `sanitizeAskPayload`), and HTML/control-character stripping on every endpoint.
+- **Abuse & Header Hardening**: `32kb` JSON body limit, sliding-window AI endpoint rate limiter (`429`), `Cache-Control: no-store` on personalized AI routes, disabled `x-powered-by`, and `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, `Permissions-Policy`, `X-DNS-Prefetch-Control`, `X-Permitted-Cross-Domain-Policies`, and `Cross-Origin-Resource-Policy` headers.
 
 ### Efficiency
 - Bounded `TtlCache` (60-minute geocoding cache, 5-minute environmental snapshot cache) prevents redundant upstream API calls.
@@ -68,6 +75,7 @@ ClearAir Winter is a full-stack GenAI-powered assistant designed to help familie
 - Compositor-only `motion/react` animations (`transform`, `opacity`).
 
 ### Accessibility (WCAG AA/AAA)
+- Enforced statically via `eslint-plugin-jsx-a11y` and verified dynamically with React Testing Library.
 - Strict `h1 -> h2 -> h3 -> h4` heading hierarchy with zero skipped levels.
 - Semantic landmarks, skip-to-main-content link, accessible mobile navigation disclosure (`aria-expanded`), full WAI-ARIA `tablist`/`tab`/`tabpanel` keyboard navigation (`ArrowLeft`, `ArrowRight`, `Home`, `End`), keyboard-navigable 24-hour dispersion bars, `role="progressbar"`, `aria-live="polite"` feedback regions, non-hue-only status indicators, and `<MotionConfig reducedMotion="user">`.
 
@@ -77,7 +85,7 @@ ClearAir Winter is a full-stack GenAI-powered assistant designed to help familie
 
 ```bash
 npm test        # Runs Vitest unit, service, API integration, and React UI/a11y suites
-npm run lint    # Runs strict tsc --noEmit verification
+npm run lint    # Runs strict tsc --noEmit and ESLint + jsx-a11y static verification
 npm run build   # Builds optimized Vite production bundle
 ```
 

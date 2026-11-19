@@ -39,7 +39,7 @@ export function HouseholdConfigurator({
     <section
       id="household"
       aria-labelledby="household-heading"
-      className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8"
+      className="scroll-mt-20 mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8"
     >
       <div className="rounded-2xl border border-slate-200 bg-white p-6 sm:p-8">
         <div className="flex flex-col gap-2 border-b border-slate-100 pb-5 sm:flex-row sm:items-end sm:justify-between">
@@ -111,8 +111,12 @@ export function HouseholdConfigurator({
             </div>
 
             <div className="flex items-end">
-              <label className="flex min-h-[44px] w-full cursor-pointer items-center gap-3 rounded-lg border border-slate-300 bg-slate-50 px-3.5 py-2 text-sm text-slate-800 hover:bg-slate-100">
+              <label
+                htmlFor="respiratory-checkbox"
+                className="flex min-h-[44px] w-full cursor-pointer items-center gap-3 rounded-lg border border-slate-300 bg-slate-50 px-3.5 py-2 text-sm text-slate-800 hover:bg-slate-100"
+              >
                 <input
+                  id="respiratory-checkbox"
                   type="checkbox"
                   checked={profile.respiratorySensitivity}
                   onChange={(e) => updateField('respiratorySensitivity', e.target.checked)}
@@ -193,7 +197,6 @@ export function HouseholdConfigurator({
             </div>
           </div>
 
-          {/* Live Household Exposure & Source Diagnostic Strip */}
           <div className="grid grid-cols-1 gap-4 border-y border-slate-100 py-4 md:grid-cols-3">
             <div>
               <p className="text-xs font-medium text-slate-600">Household Risk Share Breakdown</p>
@@ -216,13 +219,19 @@ export function HouseholdConfigurator({
 
           <div className="flex flex-col gap-4 sm:flex-row sm:items-end">
             <div className="flex-1">
-              <label htmlFor="lifestyle-notes-input" className="block text-xs font-medium text-slate-700">
-                Optional routine notes (school hours, outdoor exercise, pet walks, drafty windows)
-              </label>
+              <div className="flex items-center justify-between gap-2">
+                <label htmlFor="lifestyle-notes-input" className="block text-xs font-medium text-slate-700">
+                  Optional routine notes (school hours, outdoor exercise, pet walks, drafty windows)
+                </label>
+                <span id="lifestyle-notes-hint" className="text-xs font-mono text-slate-600 tabular-nums">
+                  {profile.lifestyleNotes.length}/280
+                </span>
+              </div>
               <input
                 id="lifestyle-notes-input"
                 type="text"
                 maxLength={280}
+                aria-describedby="lifestyle-notes-hint"
                 value={profile.lifestyleNotes}
                 onChange={(e) => updateField('lifestyleNotes', e.target.value)}
                 placeholder="e.g., 7:45 AM school drop-off, afternoon dog walk, older apartment windows"

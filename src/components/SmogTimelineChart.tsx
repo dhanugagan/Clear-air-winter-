@@ -80,11 +80,10 @@ export function SmogTimelineChart({ hourly, cleanestWindow }: SmogTimelineChartP
         </div>
       </div>
 
-      <div className="mt-5">
-        <div
-          role="list"
+      <div className="mt-5 overflow-x-auto pb-1">
+        <ul
           aria-label="Hourly PM2.5 readings"
-          className="grid grid-cols-12 gap-1.5 sm:grid-cols-[repeat(24,minmax(0,1fr))] sm:gap-1 items-end h-36 pt-4"
+          className="grid min-w-[460px] grid-cols-[repeat(24,minmax(0,1fr))] gap-1 items-end h-36 pt-4"
         >
           {visibleHours.map((point, index) => {
             const heightPct = Math.max(12, Math.round((point.pm25 / maxPm25) * 100));
@@ -94,7 +93,7 @@ export function SmogTimelineChart({ hourly, cleanestWindow }: SmogTimelineChartP
               point.hourLabel === cleanestWindow.startHour || point.hourLabel === cleanestWindow.endHour;
 
             return (
-              <div key={point.timeIso} role="listitem" className="flex h-full flex-col items-center justify-end">
+              <li key={point.timeIso} className="flex h-full flex-col items-center justify-end">
                 <button
                   ref={(el) => {
                     barButtonsRef.current[index] = el;
@@ -128,19 +127,19 @@ export function SmogTimelineChart({ hourly, cleanestWindow }: SmogTimelineChartP
                 <span className="mt-2 text-[10px] font-mono text-slate-600 tabular-nums">
                   {index % 4 === 0 ? point.hourLabel.slice(0, 2) : ''}
                 </span>
-              </div>
+              </li>
             );
           })}
-        </div>
+        </ul>
+      </div>
 
-        <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-1 text-xs text-slate-600">
-          <span>WHO 24h PM2.5 guideline: 15 µg/m³</span>
-          <span aria-hidden="true" className="text-slate-400">·</span>
-          <span className="inline-flex items-center gap-1.5">
-            <span className="inline-block h-2.5 w-2.5 rounded-xs bg-teal-700" aria-hidden="true" />
-            Highlighted cleanest 2h window
-          </span>
-        </div>
+      <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-1 text-xs text-slate-600">
+        <span>WHO 24h PM2.5 guideline: 15 µg/m³</span>
+        <span aria-hidden="true" className="text-slate-400">·</span>
+        <span className="inline-flex items-center gap-1.5">
+          <span className="inline-block h-2.5 w-2.5 rounded-xs bg-teal-700" aria-hidden="true" />
+          Highlighted cleanest 2h window
+        </span>
       </div>
     </section>
   );

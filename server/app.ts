@@ -9,6 +9,7 @@ import {
   AirQualitySnapshot,
   AskQuestionResponse,
   HouseholdProfile,
+  sanitizeAirQualitySnapshot,
   validateAskQuestion,
   validateCityQuery,
   validateCoordinates,
@@ -41,22 +42,8 @@ const DEFAULT_DEPS: ApiDependencies = {
   askQuestion: answerAirQualityQuestion,
 };
 
-function isSnapshotLike(raw: unknown): raw is AirQualitySnapshot {
-  if (!raw || typeof raw !== 'object') return false;
-  const obj = raw as Record<string, unknown>;
-  return (
-    typeof obj.locationName === 'string' &&
-    typeof obj.usAqi === 'number' &&
-    typeof obj.pm25 === 'number' &&
-    typeof obj.temperatureC === 'number' &&
-    typeof obj.windSpeedKmh === 'number' &&
-    Boolean(obj.inversionRisk) &&
-    Boolean(obj.cleanestWindow)
-  );
-}
-
 /**
- * Lightweight bounded sliding-window rate limiter to protect AI routes from bursts.
+ * Bounded sliding-window rate limiter to protect AI routes from bursts.
  */
 export function createRateLimiter(maxRequests = 30, windowMs = 5 * 60 * 1000) {
   const hits = new Map<string, number[]>();
@@ -83,6 +70,9 @@ export function createRateLimiter(maxRequests = 30, windowMs = 5 * 60 * 1000) {
   };
 }
 
+/**
+ * Builds the Express API application with hardened security headers and dependency injection.
+ */
 export function createApiApp(overrides: Partial<ApiDependencies> = {}): express.Express {
   const deps: ApiDependencies = { ...DEFAULT_DEPS, ...overrides };
   const app = express();
@@ -96,6 +86,9 @@ export function createApiApp(overrides: Partial<ApiDependencies> = {}): express.
     res.setHeader('X-Frame-Options', 'SAMEORIGIN');
     res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
     res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(self)');
+    res.setHeader('X-DNS-Prefetch-Control', 'off');
+    res.setHeader('X-Permitted-Cross-Domain-Policies', 'none');
+    res.setHeader('Cross-Origin-Resource-Policy', 'same-origin');
     next();
   });
 
@@ -139,6 +132,7 @@ export function createApiApp(overrides: Partial<ApiDependencies> = {}): express.
   });
 
   app.post('/api/assistant/plan', aiRateLimit, async (req: Request, res: Response) => {
+    res.setHeader('Cache-Control', 'no-store');
     const body = req.body as Record<string, unknown> | undefined;
     const profileCheck = validateHouseholdProfile(body?.profile);
     if (!profileCheck.ok) {
@@ -147,9 +141,8 @@ export function createApiApp(overrides: Partial<ApiDependencies> = {}): express.
     }
 
     try {
-      const snapshot = isSnapshotLike(body?.airQuality)
-        ? body.airQuality
-        : await deps.fetchByCity(profileCheck.profile.city);
+      const sanitizedSnapshot = sanitizeAirQualitySnapshot(body?.airQuality);
+      const snapshot = sanitizedSnapshot ?? (await deps.fetchByCity(profileCheck.profile.city));
 
       const plan = await deps.generatePlan(profileCheck.profile, snapshot);
       res.json(plan);
@@ -161,6 +154,7 @@ export function createApiApp(overrides: Partial<ApiDependencies> = {}): express.
   });
 
   app.post('/api/assistant/ask', aiRateLimit, async (req: Request, res: Response) => {
+    res.setHeader('Cache-Control', 'no-store');
     const body = req.body as Record<string, unknown> | undefined;
     const questionCheck = validateAskQuestion(body?.question);
     if (!questionCheck.ok) {
@@ -174,9 +168,8 @@ export function createApiApp(overrides: Partial<ApiDependencies> = {}): express.
     }
 
     try {
-      const snapshot = isSnapshotLike(body?.airQuality)
-        ? body.airQuality
-        : await deps.fetchByCity(profileCheck.profile.city);
+      const sanitizedSnapshot = sanitizeAirQualitySnapshot(body?.airQuality);
+      const snapshot = sanitizedSnapshot ?? (await deps.fetchByCity(profileCheck.profile.city));
 
       const answer = await deps.askQuestion(
         questionCheck.question,

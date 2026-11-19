@@ -80,11 +80,27 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    void loadCityAirQuality(INITIAL_PROFILE.city);
-    return () => {
-      airAbortRef.current?.abort();
+    const controller = new AbortController();
+    airAbortRef.current = controller;
+
+    const loadInitialAirQuality = async () => {
+      try {
+        const nextSnapshot = await fetchAirQualityByCityApi(INITIAL_PROFILE.city, controller.signal);
+        setLiveSnapshot(nextSnapshot);
+        setProfile((prev) => ({ ...prev, city: nextSnapshot.locationName }));
+      } catch (error) {
+        if (error instanceof DOMException && error.name === 'AbortError') return;
+        setAirError(error instanceof Error ? error.message : 'Unable to reach air quality service.');
+      } finally {
+        setIsLoadingAir(false);
+      }
     };
-  }, [loadCityAirQuality]);
+
+    void loadInitialAirQuality();
+    return () => {
+      controller.abort();
+    };
+  }, []);
 
   const handleUseCurrentLocation = () => {
     if (!navigator.geolocation) {

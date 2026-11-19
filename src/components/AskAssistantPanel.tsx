@@ -60,7 +60,7 @@ export function AskAssistantPanel({ snapshot, profile }: AskAssistantPanelProps)
     <section
       id="ask-assistant"
       aria-labelledby="ask-heading"
-      className="mx-auto max-w-7xl px-4 py-6 pb-12 sm:px-6 lg:px-8"
+      className="scroll-mt-20 mx-auto max-w-7xl px-4 py-6 pb-12 sm:px-6 lg:px-8"
     >
       <div className="rounded-2xl border border-slate-200 bg-white p-6 sm:p-8">
         <div className="flex flex-col gap-2 border-b border-slate-100 pb-5 sm:flex-row sm:items-end sm:justify-between">
@@ -100,10 +100,14 @@ export function AskAssistantPanel({ snapshot, profile }: AskAssistantPanelProps)
           <label htmlFor="ask-question-input" className="sr-only">
             Ask a question about winter air quality or indoor protection
           </label>
+          <span id="ask-question-hint" className="sr-only">
+            Maximum 400 characters. Questions are answered using your selected city air quality.
+          </span>
           <input
             id="ask-question-input"
             type="text"
             maxLength={400}
+            aria-describedby="ask-question-hint"
             value={question}
             onChange={(e) => setQuestion(e.target.value)}
             placeholder="Ask about outdoor exercise timing, stove ventilation, mask fit, or commuting..."

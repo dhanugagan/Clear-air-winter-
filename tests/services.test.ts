@@ -9,7 +9,12 @@ import {
   fetchAirQualityByCoords,
   geocodeCity,
 } from '../server/services/airQualityService';
-import { generateActionPlan } from '../server/services/geminiService';
+import {
+  generateActionPlan,
+  sanitizeActionPlanPayload,
+  sanitizeAskPayload,
+  withExponentialBackoff,
+} from '../server/services/geminiService';
 import { AirQualitySnapshot, HouseholdProfile } from '../src/shared/airQuality';
 
 const SAMPLE_PROFILE: HouseholdProfile = {
@@ -160,7 +165,7 @@ describe('airQualityService Open-Meteo Integration & Caching', () => {
   });
 });
 
-describe('geminiService Configuration Guards', () => {
+describe('geminiService Configuration Guards, Retries & Payload Sanitization', () => {
   it('throws clear configuration error when GEMINI_API_KEY is absent', async () => {
     const previous = process.env.GEMINI_API_KEY;
     delete process.env.GEMINI_API_KEY;
@@ -174,5 +179,93 @@ describe('geminiService Configuration Guards', () => {
         process.env.GEMINI_API_KEY = previous;
       }
     }
+  });
+
+  it('retries transient 429 errors via withExponentialBackoff and throws immediately on non-transient errors', async () => {
+    let attempts = 0;
+    const recovered = await withExponentialBackoff(
+      async () => {
+        attempts += 1;
+        if (attempts < 2) {
+          throw new Error('429 RESOURCE_EXHAUSTED');
+        }
+        return 'ok';
+      },
+      2,
+      1
+    );
+    expect(recovered).toBe('ok');
+    expect(attempts).toBe(2);
+
+    let fatalAttempts = 0;
+    await expect(
+      withExponentialBackoff(
+        async () => {
+          fatalAttempts += 1;
+          throw new Error('400 INVALID_ARGUMENT');
+        },
+        2,
+        1
+      )
+    ).rejects.toThrow('400 INVALID_ARGUMENT');
+    expect(fatalAttempts).toBe(1);
+  });
+
+  it('sanitizes and clamps action plan responses from Gemini', () => {
+    const cleaned = sanitizeActionPlanPayload({
+      advisoryHeadline: 'Seal windows <b>now</b>',
+      advisorySummary: 'Thermal inversion traps emissions.',
+      whyLocationMatters: '',
+      routines: [
+        {
+          id: 'r1',
+          timeWindow: '08:00',
+          title: 'Stay indoors',
+          guidance: 'Avoid rush hour',
+          directImpact: 'Lower inhaled PM2.5',
+          pm25ExposureReductionPct: 999,
+          co2eSavedKg: -4,
+          pm25EmissionAvoidedGrams: 50,
+        },
+      ],
+      indoorHacks: [
+        {
+          id: 'h1',
+          title: 'Box fan filter',
+          difficulty: 'InvalidTier',
+          stepByStep: 'Tape MERV-13 filter',
+          directImpact: 'Captures indoor particles',
+          pm25ExposureReductionPct: 1,
+          co2eSavedKg: 0,
+          pm25EmissionAvoidedGrams: 0,
+        },
+      ],
+      sustainableAlternatives: [],
+      communityActions: [],
+    });
+
+    expect(cleaned.advisoryHeadline).toBe('Seal windows bnow/b');
+    expect(cleaned.routines[0].pm25ExposureReductionPct).toBe(55);
+    expect(cleaned.routines[0].co2eSavedKg).toBe(0);
+    expect(cleaned.routines[0].pm25EmissionAvoidedGrams).toBe(18);
+    expect(cleaned.indoorHacks[0].difficulty).toBe('Low-Cost DIY');
+    expect(cleaned.indoorHacks[0].pm25ExposureReductionPct).toBe(3);
+
+    expect(() => sanitizeActionPlanPayload({ advisoryHeadline: '', advisorySummary: '' })).toThrow(
+      'omitted required advisory fields'
+    );
+  });
+
+  it('sanitizes Q&A payloads and rejects empty answers', () => {
+    const cleaned = sanitizeAskPayload({
+      answer: 'Keep windows closed <script>x</script> until 14:00.',
+      keyTakeaways: ['Point A', '', 'Point B', 'Point C', 'Point D', 'Point E'],
+      directImpactNote: 'Reduces PM2.5 exposure.',
+      safeNextStep: 'Run HEPA purifier on medium.',
+    });
+
+    expect(cleaned.answer).toBe('Keep windows closed scriptx/script until 14:00.');
+    expect(cleaned.keyTakeaways).toEqual(['Point A', 'Point B', 'Point C', 'Point D']);
+    expect(() => sanitizeAskPayload({ answer: '' })).toThrow('empty answer');
   });
 });

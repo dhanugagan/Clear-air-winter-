@@ -18,6 +18,7 @@ import {
   formatShareableBulletin,
   getAdoptedImpactBreakdown,
   HourlyForecastPoint,
+  sanitizeAirQualitySnapshot,
   sanitizeText,
   simulateActionImpact,
   validateAskQuestion,
@@ -287,5 +288,53 @@ describe('Security & Input Validation', () => {
   it('enforces minimum length on assistant questions', () => {
     expect(validateAskQuestion('Hi').ok).toBe(false);
     expect(validateAskQuestion('Is it safe to run outdoors today?').ok).toBe(true);
+  });
+
+  it('sanitizes and bounds-checks client-supplied air quality snapshots', () => {
+    expect(sanitizeAirQualitySnapshot(null)).toBeNull();
+    expect(sanitizeAirQualitySnapshot({ locationName: 'A', usAqi: 50, pm25: 10 })).toBeNull();
+
+    const cleaned = sanitizeAirQualitySnapshot({
+      locationName: 'Milan <script>alert(1)</script>',
+      regionLabel: 'Lombardy',
+      latitude: 145,
+      longitude: -220,
+      observedAtIso: '2026-11-19T09:00',
+      usAqi: 999,
+      pm25: -10,
+      pm10: 5000,
+      temperatureC: 120,
+      humidityPct: 140,
+      windSpeedKmh: -5,
+      inversionRisk: {
+        level: 'UnknownLevel',
+        score: 250,
+        summary: '<b>Trapped</b> air',
+        trappingMechanism: 'Inversion cap',
+      },
+      cleanestWindow: {
+        startHour: '13:00',
+        endHour: '15:00',
+        avgPm25: 12.4,
+        avgAqi: 52,
+        recommendation: 'Brief ventilation',
+      },
+      isSimulatedEpisode: true,
+    });
+
+    expect(cleaned).not.toBeNull();
+    expect(cleaned?.locationName).toBe('Milan scriptalert(1)/script');
+    expect(cleaned?.latitude).toBe(90);
+    expect(cleaned?.longitude).toBe(-180);
+    expect(cleaned?.usAqi).toBe(500);
+    expect(cleaned?.pm25).toBe(0);
+    expect(cleaned?.pm10).toBe(1500);
+    expect(cleaned?.temperatureC).toBe(55);
+    expect(cleaned?.humidityPct).toBe(100);
+    expect(cleaned?.windSpeedKmh).toBe(0);
+    expect(cleaned?.inversionRisk.level).toBe('Elevated');
+    expect(cleaned?.inversionRisk.score).toBe(100);
+    expect(cleaned?.inversionRisk.summary).toBe('bTrapped/b air');
+    expect(cleaned?.isSimulatedEpisode).toBe(true);
   });
 });

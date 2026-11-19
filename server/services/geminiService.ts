@@ -10,6 +10,7 @@ import {
   AskQuestionResponse,
   HouseholdProfile,
   analyzeHouseholdEmissionProfile,
+  sanitizeText,
 } from '../../src/shared/airQuality.ts';
 
 function getGeminiClient(): GoogleGenAI {
@@ -29,7 +30,14 @@ function getGeminiClient(): GoogleGenAI {
   });
 }
 
-async function withExponentialBackoff<T>(fn: () => Promise<T>, maxRetries = 2): Promise<T> {
+/**
+ * Retries transient 429/503 upstream errors using bounded exponential backoff.
+ */
+export async function withExponentialBackoff<T>(
+  fn: () => Promise<T>,
+  maxRetries = 2,
+  baseDelayMs = 400
+): Promise<T> {
   let attempt = 0;
   let lastError: unknown;
   while (attempt <= maxRetries) {
@@ -46,7 +54,7 @@ async function withExponentialBackoff<T>(fn: () => Promise<T>, maxRetries = 2): 
       if (!isTransient || attempt === maxRetries) {
         throw error;
       }
-      const delayMs = 400 * Math.pow(2, attempt);
+      const delayMs = baseDelayMs * Math.pow(2, attempt);
       await new Promise((resolve) => setTimeout(resolve, delayMs));
       attempt += 1;
     }
@@ -68,21 +76,114 @@ function normalizeDifficulty(raw: unknown): 'Zero-Cost Habit' | 'Low-Cost DIY' |
   return 'Low-Cost DIY';
 }
 
+/**
+ * Validates and sanitizes raw structured JSON output from Gemini for action plans.
+ */
+export function sanitizeActionPlanPayload(raw: unknown): ActionPlanResponse {
+  if (!raw || typeof raw !== 'object') {
+    throw new Error('AI response payload is malformed.');
+  }
+  const obj = raw as Record<string, unknown>;
+  const advisoryHeadline = sanitizeText(obj.advisoryHeadline, 220);
+  const advisorySummary = sanitizeText(obj.advisorySummary, 600);
+  const whyLocationMatters = sanitizeText(obj.whyLocationMatters, 450);
+
+  if (!advisoryHeadline || !advisorySummary) {
+    throw new Error('AI response omitted required advisory fields.');
+  }
+
+  const routinesRaw = Array.isArray(obj.routines) ? obj.routines : [];
+  const indoorRaw = Array.isArray(obj.indoorHacks) ? obj.indoorHacks : [];
+  const altRaw = Array.isArray(obj.sustainableAlternatives) ? obj.sustainableAlternatives : [];
+  const communityRaw = Array.isArray(obj.communityActions) ? obj.communityActions : [];
+
+  return {
+    generatedAtIso: new Date().toISOString(),
+    advisoryHeadline,
+    advisorySummary,
+    whyLocationMatters: whyLocationMatters || 'Local cold-air dispersion shapes winter particulate accumulation.',
+    routines: routinesRaw.slice(0, 6).map((item, idx) => {
+      const r = (item && typeof item === 'object' ? item : {}) as Record<string, unknown>;
+      return {
+        id: sanitizeText(r.id, 40) || `routine-${idx + 1}`,
+        timeWindow: sanitizeText(r.timeWindow, 40) || 'Daytime',
+        title: sanitizeText(r.title, 120) || 'Low-emission daily adjustment',
+        guidance: sanitizeText(r.guidance, 360),
+        directImpact: sanitizeText(r.directImpact, 320),
+        pm25ExposureReductionPct: clampMetric(r.pm25ExposureReductionPct, 3, 55, 0),
+        co2eSavedKg: clampMetric(r.co2eSavedKg, 0, 12, 1),
+        pm25EmissionAvoidedGrams: clampMetric(r.pm25EmissionAvoidedGrams, 0, 18, 1),
+      };
+    }),
+    indoorHacks: indoorRaw.slice(0, 6).map((item, idx) => {
+      const h = (item && typeof item === 'object' ? item : {}) as Record<string, unknown>;
+      return {
+        id: sanitizeText(h.id, 40) || `indoor-${idx + 1}`,
+        title: sanitizeText(h.title, 120) || 'Indoor particulate reduction step',
+        difficulty: normalizeDifficulty(h.difficulty),
+        stepByStep: sanitizeText(h.stepByStep, 400),
+        directImpact: sanitizeText(h.directImpact, 320),
+        pm25ExposureReductionPct: clampMetric(h.pm25ExposureReductionPct, 3, 60, 0),
+        co2eSavedKg: clampMetric(h.co2eSavedKg, 0, 8, 1),
+        pm25EmissionAvoidedGrams: clampMetric(h.pm25EmissionAvoidedGrams, 0, 15, 1),
+      };
+    }),
+    sustainableAlternatives: altRaw.slice(0, 6).map((item, idx) => {
+      const s = (item && typeof item === 'object' ? item : {}) as Record<string, unknown>;
+      return {
+        id: sanitizeText(s.id, 40) || `alt-${idx + 1}`,
+        currentHabit: sanitizeText(s.currentHabit, 140) || 'Current baseline habit',
+        sustainableSwap: sanitizeText(s.sustainableSwap, 140) || 'Low-emission alternative',
+        whyItHelps: sanitizeText(s.whyItHelps, 360),
+        directImpact: sanitizeText(s.directImpact, 320),
+        pm25ExposureReductionPct: clampMetric(s.pm25ExposureReductionPct, 2, 45, 0),
+        co2eSavedKg: clampMetric(s.co2eSavedKg, 0.1, 15, 1),
+        pm25EmissionAvoidedGrams: clampMetric(s.pm25EmissionAvoidedGrams, 0.1, 20, 1),
+      };
+    }),
+    communityActions: communityRaw.slice(0, 6).map((item, idx) => {
+      const c = (item && typeof item === 'object' ? item : {}) as Record<string, unknown>;
+      return {
+        id: sanitizeText(c.id, 40) || `community-${idx + 1}`,
+        title: sanitizeText(c.title, 120) || 'Neighborhood clean-air initiative',
+        whoCanJoin: sanitizeText(c.whoCanJoin, 100) || 'Families & neighbors',
+        actionSummary: sanitizeText(c.actionSummary, 360),
+        collectiveImpact: sanitizeText(c.collectiveImpact, 320),
+      };
+    }),
+  };
+}
+
+/**
+ * Validates and sanitizes raw structured JSON output from Gemini for Q&A responses.
+ */
+export function sanitizeAskPayload(raw: unknown): AskQuestionResponse {
+  if (!raw || typeof raw !== 'object') {
+    throw new Error('AI answer payload is malformed.');
+  }
+  const obj = raw as Record<string, unknown>;
+  const answer = sanitizeText(obj.answer, 900);
+  if (!answer) {
+    throw new Error('AI returned an empty answer.');
+  }
+  const takeawaysRaw = Array.isArray(obj.keyTakeaways) ? obj.keyTakeaways : [];
+  return {
+    answer,
+    keyTakeaways: takeawaysRaw
+      .map((item) => sanitizeText(item, 220))
+      .filter(Boolean)
+      .slice(0, 4),
+    directImpactNote: sanitizeText(obj.directImpactNote, 360),
+    safeNextStep: sanitizeText(obj.safeNextStep, 280),
+  };
+}
+
 const ACTION_PLAN_SCHEMA = {
   type: Type.OBJECT,
   properties: {
-    advisoryHeadline: {
-      type: Type.STRING,
-      description: 'Concise 1-sentence headline summarizing today winter smog strategy for this family.',
-    },
-    advisorySummary: {
-      type: Type.STRING,
-      description: '2-3 crisp sentences explaining current air risks and immediate household priorities.',
-    },
-    whyLocationMatters: {
-      type: Type.STRING,
-      description: 'Specific explanation linking local weather, thermal inversion risk, and pollutant levels.',
-    },
+    advisoryHeadline: { type: Type.STRING },
+    advisorySummary: { type: Type.STRING },
+    whyLocationMatters: { type: Type.STRING },
     routines: {
       type: Type.ARRAY,
       items: {
@@ -92,10 +193,7 @@ const ACTION_PLAN_SCHEMA = {
           timeWindow: { type: Type.STRING },
           title: { type: Type.STRING },
           guidance: { type: Type.STRING },
-          directImpact: {
-            type: Type.STRING,
-            description: 'Clear explanation of how this routine reduces exposure or emissions.',
-          },
+          directImpact: { type: Type.STRING },
           pm25ExposureReductionPct: { type: Type.NUMBER },
           co2eSavedKg: { type: Type.NUMBER },
           pm25EmissionAvoidedGrams: { type: Type.NUMBER },
@@ -193,27 +291,17 @@ const ACTION_PLAN_SCHEMA = {
 const ASK_SCHEMA = {
   type: Type.OBJECT,
   properties: {
-    answer: {
-      type: Type.STRING,
-      description: 'Direct, evidence-grounded answer tailored to the household and live air telemetry.',
-    },
-    keyTakeaways: {
-      type: Type.ARRAY,
-      items: { type: Type.STRING },
-      description: '2 to 3 concise actionable bullet points.',
-    },
-    directImpactNote: {
-      type: Type.STRING,
-      description: 'Concrete explanation of how following this advice affects exposure or local emissions.',
-    },
-    safeNextStep: {
-      type: Type.STRING,
-      description: 'One immediate step the family can take within the next 30 minutes.',
-    },
+    answer: { type: Type.STRING },
+    keyTakeaways: { type: Type.ARRAY, items: { type: Type.STRING } },
+    directImpactNote: { type: Type.STRING },
+    safeNextStep: { type: Type.STRING },
   },
   required: ['answer', 'keyTakeaways', 'directImpactNote', 'safeNextStep'],
 };
 
+/**
+ * Generates a structured winter smog action plan tailored to location telemetry and household lifestyle.
+ */
 export async function generateActionPlan(
   profile: HouseholdProfile,
   airQuality: AirQualitySnapshot
@@ -266,41 +354,12 @@ export async function generateActionPlan(
     throw new Error('Gemini returned an empty action plan response.');
   }
 
-  const parsed = JSON.parse(rawText) as Omit<ActionPlanResponse, 'generatedAtIso'>;
-  return {
-    advisoryHeadline: parsed.advisoryHeadline,
-    advisorySummary: parsed.advisorySummary,
-    whyLocationMatters: parsed.whyLocationMatters,
-    routines: (parsed.routines ?? []).map((item, idx) => ({
-      ...item,
-      id: item.id || `routine-${idx + 1}`,
-      pm25ExposureReductionPct: clampMetric(item.pm25ExposureReductionPct, 3, 55, 0),
-      co2eSavedKg: clampMetric(item.co2eSavedKg, 0, 12, 1),
-      pm25EmissionAvoidedGrams: clampMetric(item.pm25EmissionAvoidedGrams, 0, 18, 1),
-    })),
-    indoorHacks: (parsed.indoorHacks ?? []).map((item, idx) => ({
-      ...item,
-      id: item.id || `indoor-${idx + 1}`,
-      difficulty: normalizeDifficulty(item.difficulty),
-      pm25ExposureReductionPct: clampMetric(item.pm25ExposureReductionPct, 3, 60, 0),
-      co2eSavedKg: clampMetric(item.co2eSavedKg, 0, 8, 1),
-      pm25EmissionAvoidedGrams: clampMetric(item.pm25EmissionAvoidedGrams, 0, 15, 1),
-    })),
-    sustainableAlternatives: (parsed.sustainableAlternatives ?? []).map((item, idx) => ({
-      ...item,
-      id: item.id || `alt-${idx + 1}`,
-      pm25ExposureReductionPct: clampMetric(item.pm25ExposureReductionPct, 2, 45, 0),
-      co2eSavedKg: clampMetric(item.co2eSavedKg, 0.1, 15, 1),
-      pm25EmissionAvoidedGrams: clampMetric(item.pm25EmissionAvoidedGrams, 0.1, 20, 1),
-    })),
-    communityActions: (parsed.communityActions ?? []).map((item, idx) => ({
-      ...item,
-      id: item.id || `community-${idx + 1}`,
-    })),
-    generatedAtIso: new Date().toISOString(),
-  };
+  return sanitizeActionPlanPayload(JSON.parse(rawText));
 }
 
+/**
+ * Answers a contextual household air quality question grounded in live city telemetry.
+ */
 export async function answerAirQualityQuestion(
   question: string,
   profile: HouseholdProfile,
@@ -345,5 +404,5 @@ export async function answerAirQualityQuestion(
     throw new Error('Gemini returned an empty answer.');
   }
 
-  return JSON.parse(rawText) as AskQuestionResponse;
+  return sanitizeAskPayload(JSON.parse(rawText));
 }

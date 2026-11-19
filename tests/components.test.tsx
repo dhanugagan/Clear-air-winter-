@@ -10,10 +10,13 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { MotionConfig } from 'motion/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ActionPlanWorkspace } from '../src/components/ActionPlanWorkspace';
+import { AskAssistantPanel } from '../src/components/AskAssistantPanel';
+import { CommunityMultiplierPanel } from '../src/components/CommunityMultiplierPanel';
 import { ErrorBoundary } from '../src/components/ErrorBoundary';
 import { HeroTelemetry } from '../src/components/HeroTelemetry';
 import { HouseholdConfigurator } from '../src/components/HouseholdConfigurator';
 import { ImpactSimulatorPanel } from '../src/components/ImpactSimulatorPanel';
+import { SmogTimelineChart } from '../src/components/SmogTimelineChart';
 import { TopNav } from '../src/components/TopNav';
 import {
   ActionPlanResponse,
@@ -24,6 +27,7 @@ import {
 
 afterEach(() => {
   cleanup();
+  vi.restoreAllMocks();
 });
 
 const PROFILE: HouseholdProfile = {
@@ -70,6 +74,7 @@ const SNAPSHOT: AirQualitySnapshot = {
   hourly: [
     { timeIso: '2026-11-19T08:00', hourLabel: '08:00', pm25: 68.2, pm10: 84, usAqi: 158, windSpeedKmh: 3.1, temperatureC: -2 },
     { timeIso: '2026-11-19T14:00', hourLabel: '14:00', pm25: 38.0, pm10: 50, usAqi: 107, windSpeedKmh: 9.0, temperatureC: 2 },
+    { timeIso: '2026-11-19T19:00', hourLabel: '19:00', pm25: 74.0, pm10: 90, usAqi: 165, windSpeedKmh: 2.5, temperatureC: -1 },
   ],
 };
 
@@ -175,6 +180,28 @@ describe('UI Components & Accessibility Interactions', () => {
     expect(onSelectCity).toHaveBeenCalledWith('Milan');
   });
 
+  it('supports keyboard navigation across SmogTimelineChart bars', () => {
+    render(
+      <MotionConfig reducedMotion="user">
+        <SmogTimelineChart hourly={SNAPSHOT.hourly} cleanestWindow={SNAPSHOT.cleanestWindow} />
+      </MotionConfig>
+    );
+
+    const bar08 = screen.getByRole('button', { name: /08:00: PM2.5 68.2/ });
+    const bar14 = screen.getByRole('button', { name: /14:00: PM2.5 38/ });
+    const bar19 = screen.getByRole('button', { name: /19:00: PM2.5 74/ });
+
+    expect(bar08).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.keyDown(bar08, { key: 'ArrowRight' });
+    expect(bar14).toHaveAttribute('aria-pressed', 'true');
+
+    fireEvent.keyDown(bar14, { key: 'End' });
+    expect(bar19).toHaveAttribute('aria-pressed', 'true');
+
+    fireEvent.keyDown(bar19, { key: 'Home' });
+    expect(bar08).toHaveAttribute('aria-pressed', 'true');
+  });
+
   it('updates HouseholdConfigurator diagnostics live when heating source changes', () => {
     const onChange = vi.fn();
     render(
@@ -230,6 +257,71 @@ describe('UI Components & Accessibility Interactions', () => {
     // Toggle indoor hack button
     fireEvent.click(screen.getByRole('button', { name: 'Apply Indoor Hack' }));
     expect(onToggleChoice).toHaveBeenCalledWith('h1');
+  });
+
+  it('scales collective savings, toggles pledges, and copies bulletin in CommunityMultiplierPanel', async () => {
+    const onToggleCommunity = vi.fn();
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText },
+    });
+
+    const impact = simulateActionImpact(['r1', 'h1'], PLAN, SNAPSHOT.pm25);
+    render(
+      <CommunityMultiplierPanel
+        plan={PLAN}
+        snapshot={SNAPSHOT}
+        profile={PROFILE}
+        impact={impact}
+        adoptedCommunityIds={[]}
+        onToggleCommunityChoice={onToggleCommunity}
+      />
+    );
+
+    expect(screen.getByText('45 people')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '50' }));
+    expect(screen.getByText('150 people')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Pledge Community Action' }));
+    expect(onToggleCommunity).toHaveBeenCalledWith('c1');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Copy Shareable Bulletin' }));
+    expect(await screen.findByText('Neighborhood bulletin copied to clipboard.')).toBeInTheDocument();
+    expect(writeText).toHaveBeenCalledTimes(1);
+  });
+
+  it('validates short questions and renders live advisor responses in AskAssistantPanel', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          answer: 'Have children wear an N95/KF94 mask if walking near traffic.',
+          keyTakeaways: ['Morning PM2.5 is 68.2 µg/m³', 'Cleanest window begins at 14:00'],
+          directImpactNote: 'Properly sealed respirators filter over 90% of fine particles.',
+          safeNextStep: 'Check mask nose-wire seal before leaving.',
+        }),
+        { status: 200 }
+      )
+    );
+
+    render(
+      <MotionConfig reducedMotion="user">
+        <AskAssistantPanel snapshot={SNAPSHOT} profile={PROFILE} />
+      </MotionConfig>
+    );
+
+    const input = screen.getByLabelText(/Ask a question about winter air quality/i);
+    fireEvent.change(input, { target: { value: 'Hi' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Ask Advisor' }));
+    expect(screen.getByRole('alert')).toHaveTextContent('at least 4 characters');
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Is it safe for children to walk to school this morning?' })
+    );
+    expect(
+      await screen.findByText('Have children wear an N95/KF94 mask if walking near traffic.')
+    ).toBeInTheDocument();
+    expect(screen.getByText('Check mask nose-wire seal before leaving.')).toBeInTheDocument();
   });
 
   it('renders Direct Causal Breakdown table inside ImpactSimulatorPanel', () => {

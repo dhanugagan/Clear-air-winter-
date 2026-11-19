@@ -79,7 +79,7 @@ export function ActionPlanWorkspace({
     <section
       id="action-plan"
       aria-labelledby="action-plan-heading"
-      className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8"
+      className="scroll-mt-20 mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8"
     >
       <div className="rounded-2xl border border-slate-200 bg-white p-6 sm:p-8">
         <div className="flex flex-col gap-3 border-b border-slate-100 pb-5 sm:flex-row sm:items-end sm:justify-between">
