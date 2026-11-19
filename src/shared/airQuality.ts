@@ -74,6 +74,7 @@ export interface AirQualitySnapshot {
   inversionRisk: InversionRiskAssessment;
   cleanestWindow: VentilationWindow;
   hourly: HourlyForecastPoint[];
+  isSimulatedEpisode?: boolean;
 }
 
 export interface RoutineStep {
@@ -146,6 +147,41 @@ export interface ImpactSimulationResult {
   dominantDriver: string;
 }
 
+export interface HouseholdEmissionDiagnostic {
+  heatingSharePct: number;
+  commuteSharePct: number;
+  infiltrationSharePct: number;
+  topExposureRisk: string;
+  topEmissionSource: string;
+  filtrationEfficiencyLabel: string;
+}
+
+export interface CommunityMultiplierResult {
+  participatingHouseholds: number;
+  adoptedCommunityCount: number;
+  monthlyCo2eAvoidedKg: number;
+  monthlyPm25AvoidedKg: number;
+  cleanAirProtectedResidents: number;
+}
+
+export interface FamilySafetyDirective {
+  id: string;
+  domain: 'Outdoor Activity' | 'Commute & Masking' | 'Window Ventilation' | 'Indoor Filtration';
+  status: 'Clear' | 'Caution' | 'Protect';
+  directive: string;
+  rationale: string;
+}
+
+export interface AdoptedImpactItem {
+  id: string;
+  category: 'Routine' | 'Indoor Hack' | 'Sustainable Swap';
+  title: string;
+  directImpact: string;
+  pm25ExposureReductionPct: number;
+  co2eSavedKg: number;
+  pm25EmissionAvoidedGrams: number;
+}
+
 export interface AqiClassification {
   level: AqiLevel;
   label: string;
@@ -165,7 +201,7 @@ export function classifyAqi(usAqi: number): AqiClassification {
       level: 'Good',
       label: 'Good Air Quality',
       shortGuidance: 'Ideal window for outdoor movement and cross-ventilating indoor rooms.',
-      textClass: 'text-emerald-800',
+      textClass: 'text-emerald-900',
       surfaceClass: 'bg-emerald-50',
       borderClass: 'border-emerald-200',
       barColor: '#15803d',
@@ -177,7 +213,7 @@ export function classifyAqi(usAqi: number): AqiClassification {
       level: 'Moderate',
       label: 'Moderate Haze',
       shortGuidance: 'Generally tolerable; sensitive households should shorten vigorous roadside exercise.',
-      textClass: 'text-amber-800',
+      textClass: 'text-amber-900',
       surfaceClass: 'bg-amber-50',
       borderClass: 'border-amber-200',
       barColor: '#b45309',
@@ -189,7 +225,7 @@ export function classifyAqi(usAqi: number): AqiClassification {
       level: 'Sensitive',
       label: 'Unhealthy for Sensitive Groups',
       shortGuidance: 'Children, older adults, and asthma households should limit prolonged outdoor exertion.',
-      textClass: 'text-orange-800',
+      textClass: 'text-orange-900',
       surfaceClass: 'bg-orange-50',
       borderClass: 'border-orange-200',
       barColor: '#c2410c',
@@ -201,7 +237,7 @@ export function classifyAqi(usAqi: number): AqiClassification {
       level: 'Unhealthy',
       label: 'Unhealthy Winter Smog',
       shortGuidance: 'Keep windows sealed, run indoor filtration continuously, and avoid burning solid fuels.',
-      textClass: 'text-rose-800',
+      textClass: 'text-rose-900',
       surfaceClass: 'bg-rose-50',
       borderClass: 'border-rose-200',
       barColor: '#be123c',
@@ -213,7 +249,7 @@ export function classifyAqi(usAqi: number): AqiClassification {
       level: 'Very Unhealthy',
       label: 'Very Unhealthy Smog Episode',
       shortGuidance: 'Move all family exercise indoors, wear N95/KF94 masks outdoors, and run clean-air rooms.',
-      textClass: 'text-red-900',
+      textClass: 'text-red-950',
       surfaceClass: 'bg-red-50',
       borderClass: 'border-red-300',
       barColor: '#991b1b',
@@ -341,13 +377,133 @@ export function findCleanestVentilationWindow(hourly: HourlyForecastPoint[]): Ve
   };
 }
 
+/**
+ * Generates a realistic severe winter smog stress-test scenario anchored to the active city
+ * so families can prepare emergency routines even when current live weather is clear.
+ */
+export function createSevereSmogScenario(baseSnapshot: AirQualitySnapshot): AirQualitySnapshot {
+  const scenarioHourly: HourlyForecastPoint[] = Array.from({ length: 24 }, (_, hour) => {
+    const label = `${String(hour).padStart(2, '0')}:00`;
+    const morningRush = hour >= 6 && hour <= 10 ? 1.25 : 1;
+    const eveningHearth = hour >= 18 && hour <= 22 ? 1.32 : 1;
+    const afternoonDip = hour >= 13 && hour <= 15 ? 0.62 : 1;
+    const pm25 = Math.round(145 * morningRush * eveningHearth * afternoonDip * 10) / 10;
+    const pm10 = Math.round(pm25 * 1.38 * 10) / 10;
+    const usAqi = Math.min(295, Math.round(pm25 * 1.35 + 18));
+    const windSpeedKmh = hour >= 13 && hour <= 15 ? 6.5 : 2.6;
+    const temperatureC = hour >= 12 && hour <= 15 ? -1.5 : -5.0;
+
+    return {
+      timeIso: `2026-11-19T${label}`,
+      hourLabel: label,
+      pm25,
+      pm10,
+      usAqi,
+      windSpeedKmh,
+      temperatureC,
+    };
+  });
+
+  const inversionRisk = calculateInversionRisk({
+    temperatureC: -4.5,
+    windSpeedKmh: 2.6,
+    pm25: 168.4,
+    humidityPct: 86,
+  });
+
+  return {
+    ...baseSnapshot,
+    usAqi: 218,
+    pm25: 168.4,
+    pm10: 232.0,
+    no2: 94.2,
+    so2: 18.6,
+    co: 1180,
+    temperatureC: -4.5,
+    humidityPct: 86,
+    windSpeedKmh: 2.6,
+    inversionRisk,
+    cleanestWindow: findCleanestVentilationWindow(scenarioHourly),
+    hourly: scenarioHourly,
+    isSimulatedEpisode: true,
+  };
+}
+
+export function analyzeHouseholdEmissionProfile(
+  profile: HouseholdProfile,
+  snapshot: AirQualitySnapshot | null
+): HouseholdEmissionDiagnostic {
+  const heatingWeights: Record<HeatingSource, number> = {
+    wood_or_coal: 55,
+    natural_gas: 28,
+    district_heating: 18,
+    heat_pump: 10,
+  };
+  const commuteWeights: Record<CommuteMode, number> = {
+    private_car: 45,
+    carpool: 24,
+    public_transit: 12,
+    remote_hybrid: 8,
+    walk_or_bike: 4,
+  };
+  const infiltrationWeights: Record<FiltrationSetup, number> = {
+    none: 44,
+    basic_hvac: 28,
+    diy_corsi_rosenthal: 14,
+    hepa_purifier: 10,
+  };
+
+  const hRaw = heatingWeights[profile.heatingSource];
+  const cRaw = commuteWeights[profile.commuteMode];
+  const iRaw = infiltrationWeights[profile.filtrationSetup];
+  const total = hRaw + cRaw + iRaw;
+
+  const heatingSharePct = Math.round((hRaw / total) * 100);
+  const commuteSharePct = Math.round((cRaw / total) * 100);
+  const infiltrationSharePct = Math.max(0, 100 - heatingSharePct - commuteSharePct);
+
+  const topEmissionSource =
+    profile.heatingSource === 'wood_or_coal'
+      ? 'Solid-fuel hearth & wood smoke (high direct PM2.5)'
+      : profile.commuteMode === 'private_car'
+        ? 'Cold-start vehicle trips during morning inversion'
+        : profile.heatingSource === 'natural_gas'
+          ? 'Indoor gas stove NO₂ & combustion heating'
+          : 'Low baseline combustion footprint';
+
+  const outdoorPm = snapshot?.pm25 ?? 35;
+  const topExposureRisk =
+    profile.filtrationSetup === 'none' && outdoorPm >= 25
+      ? 'Unfiltered outdoor PM2.5 seepage & indoor cooking peaks'
+      : profile.respiratorySensitivity || profile.children > 0 || profile.seniors > 0
+        ? 'Sensitive lung exposure during dawn & evening rush hours'
+        : 'Peak roadside & indoor cooking particle spikes';
+
+  const filtrationEfficiencyLabel =
+    profile.filtrationSetup === 'hepa_purifier'
+      ? 'High (~85–95% single-room capture)'
+      : profile.filtrationSetup === 'diy_corsi_rosenthal'
+        ? 'High (~80–90% high-CADR capture)'
+        : profile.filtrationSetup === 'basic_hvac'
+          ? 'Low (~20–35% for fine PM2.5)'
+          : 'None (0% active capture)';
+
+  return {
+    heatingSharePct,
+    commuteSharePct,
+    infiltrationSharePct,
+    topExposureRisk,
+    topEmissionSource,
+    filtrationEfficiencyLabel,
+  };
+}
+
 export function simulateActionImpact(
   selectedIds: ReadonlyArray<string>,
   plan: ActionPlanResponse | null,
   baselineOutdoorPm25: number
 ): ImpactSimulationResult {
   const safeOutdoorPm25 = Number.isFinite(baselineOutdoorPm25) ? Math.max(1, baselineOutdoorPm25) : 35;
-  // Unmitigated indoor infiltration baseline during winter closed-window conditions (~65% of outdoor PM2.5)
   const unmitigatedIndoorPm25 = safeOutdoorPm25 * 0.65;
 
   if (!plan) {
@@ -376,7 +532,6 @@ export function simulateActionImpact(
   const selectedSet = new Set(selectedIds);
   const chosen = actionableItems.filter((item) => selectedSet.has(item.id));
 
-  // Multiplicative diminishing-returns model so combined exposure reduction never exceeds physical 92% ceiling
   let remainingExposureFactor = 1;
   let co2eSavedDailyKg = 0;
   let pm25EmissionsAvoidedDailyGrams = 0;
@@ -413,9 +568,181 @@ export function simulateActionImpact(
   };
 }
 
-/**
- * Strip control characters and angle brackets to ensure clean, safe plain-text values.
- */
+export function calculateCommunityImpact(
+  impact: ImpactSimulationResult,
+  participatingHouseholds: number,
+  adoptedCommunityCount: number,
+  householdMembersCount: number
+): CommunityMultiplierResult {
+  const safeHouseholds = Math.max(1, Math.min(500, Math.round(participatingHouseholds)));
+  const safeMembers = Math.max(1, Math.round(householdMembersCount));
+  const bonusFactor = 1 + Math.min(3, Math.max(0, adoptedCommunityCount)) * 0.12;
+
+  const monthlyCo2eAvoidedKg = Math.round(impact.co2eSavedMonthlyKg * safeHouseholds * bonusFactor);
+  const monthlyPm25AvoidedKg =
+    Math.round(((impact.pm25EmissionsAvoidedDailyGrams * 30 * safeHouseholds * bonusFactor) / 1000) * 100) /
+    100;
+
+  return {
+    participatingHouseholds: safeHouseholds,
+    adoptedCommunityCount: Math.max(0, adoptedCommunityCount),
+    monthlyCo2eAvoidedKg,
+    monthlyPm25AvoidedKg,
+    cleanAirProtectedResidents: safeHouseholds * safeMembers,
+  };
+}
+
+export function formatShareableBulletin(params: {
+  snapshot: AirQualitySnapshot;
+  plan: ActionPlanResponse;
+  impact: ImpactSimulationResult;
+  community: CommunityMultiplierResult;
+}): string {
+  const { snapshot, plan, impact, community } = params;
+  const aqiMeta = classifyAqi(snapshot.usAqi);
+
+  return [
+    `ClearAir Winter Neighborhood Bulletin — ${snapshot.locationName}`,
+    `Status: US AQI ${snapshot.usAqi} (${aqiMeta.label}) | PM2.5: ${snapshot.pm25} µg/m³ | Inversion Risk: ${snapshot.inversionRisk.level}`,
+    `Cleanest 2h Ventilation Window: ${snapshot.cleanestWindow.startHour}–${snapshot.cleanestWindow.endHour} (Est. ${snapshot.cleanestWindow.avgPm25} µg/m³)`,
+    '',
+    `Advisory: ${plan.advisoryHeadline}`,
+    plan.advisorySummary,
+    '',
+    'Top Household & Neighborhood Priorities:',
+    ...plan.routines.slice(0, 2).map((r) => `- [${r.timeWindow}] ${r.title}: ${r.directImpact}`),
+    ...plan.indoorHacks.slice(0, 2).map((h) => `- [Indoor] ${h.title}: ${h.directImpact}`),
+    ...plan.communityActions.slice(0, 2).map((c) => `- [Community] ${c.title}: ${c.collectiveImpact}`),
+    '',
+    `Measured Impact (${community.participatingHouseholds} participating households):`,
+    `- Indoor PM2.5 Exposure Cut: -${impact.indoorExposureReductionPct}% (projected ${impact.projectedIndoorPm25} µg/m³ indoors)`,
+    `- Monthly Neighborhood CO2e Avoided: ${community.monthlyCo2eAvoidedKg} kg`,
+    `- Monthly Direct PM2.5 Smoke Prevented: ${community.monthlyPm25AvoidedKg} kg`,
+  ].join('\n');
+}
+
+export function buildFamilySafetyMatrix(
+  snapshot: AirQualitySnapshot,
+  profile: HouseholdProfile
+): FamilySafetyDirective[] {
+  const hasVulnerable =
+    profile.respiratorySensitivity || profile.children > 0 || profile.seniors > 0;
+  const aqi = snapshot.usAqi;
+  const highSmog = aqi > 150 || (hasVulnerable && aqi > 100);
+  const moderateSmog = aqi > 75 || (hasVulnerable && aqi > 50);
+
+  return [
+    {
+      id: 'outdoor',
+      domain: 'Outdoor Activity',
+      status: highSmog ? 'Protect' : moderateSmog ? 'Caution' : 'Clear',
+      directive: highSmog
+        ? 'Move brisk exercise & play indoors'
+        : moderateSmog
+          ? `Time short outings for ${snapshot.cleanestWindow.startHour}–${snapshot.cleanestWindow.endHour}`
+          : 'Normal outdoor activity safe',
+      rationale: highSmog
+        ? `At US AQI ${aqi}, deep breathing outdoors multiplies fine particle lung deposition.`
+        : moderateSmog
+          ? `Sensitive family members benefit from shifting walks away from rush-hour inversion peaks.`
+          : `Current dispersion keeps street-level PM2.5 (${snapshot.pm25} µg/m³) within safer bounds.`,
+    },
+    {
+      id: 'masking',
+      domain: 'Commute & Masking',
+      status: aqi > 150 ? 'Protect' : aqi > 100 || (hasVulnerable && aqi > 75) ? 'Caution' : 'Clear',
+      directive:
+        aqi > 150
+          ? 'Fitted N95 / KF94 for all outdoor transit'
+          : aqi > 100 || (hasVulnerable && aqi > 75)
+            ? 'N95 / KN95 recommended on busy corridors'
+            : 'No respirator needed; favor transit/walk',
+      rationale:
+        aqi > 100
+          ? 'Well-fitted electrostatic respirators filter >94% of sub-2.5 µm combustion aerosols.'
+          : 'Avoid idling engines during school drop-offs to keep local roadside NO₂ low.',
+    },
+    {
+      id: 'ventilation',
+      domain: 'Window Ventilation',
+      status: aqi > 120 ? 'Protect' : aqi > 65 ? 'Caution' : 'Clear',
+      directive:
+        aqi > 120
+          ? 'Keep exterior windows tightly sealed'
+          : `Brief 10-min airing at ${snapshot.cleanestWindow.startHour}–${snapshot.cleanestWindow.endHour}`,
+      rationale:
+        aqi > 120
+          ? `Outdoor PM2.5 (${snapshot.pm25} µg/m³) exceeds safe airing limits; seal drafts with door sweeps.`
+          : `Opening opposite windows briefly during ${snapshot.cleanestWindow.startHour} refreshes CO₂ with minimal smog entry.`,
+    },
+    {
+      id: 'filtration',
+      domain: 'Indoor Filtration',
+      status: highSmog || profile.filtrationSetup === 'none' ? 'Protect' : moderateSmog ? 'Caution' : 'Clear',
+      directive:
+        profile.filtrationSetup === 'none'
+          ? 'Add HEPA or DIY Corsi-Rosenthal unit'
+          : highSmog
+            ? 'Run HEPA on High continuously; HVAC recirculate'
+            : 'Run purifier on Medium during cooking/evenings',
+      rationale:
+        profile.filtrationSetup === 'none'
+          ? 'Without active MERV-13/HEPA capture, indoor PM2.5 settles at ~65% of outdoor winter smog.'
+          : 'Continuous air changes cut bedroom fine particulates overnight by 50–85%.',
+    },
+  ];
+}
+
+export function getAdoptedImpactBreakdown(
+  selectedIds: ReadonlyArray<string>,
+  plan: ActionPlanResponse | null
+): AdoptedImpactItem[] {
+  if (!plan || !selectedIds.length) return [];
+  const selectedSet = new Set(selectedIds);
+
+  const items: AdoptedImpactItem[] = [];
+  for (const r of plan.routines) {
+    if (selectedSet.has(r.id)) {
+      items.push({
+        id: r.id,
+        category: 'Routine',
+        title: r.title,
+        directImpact: r.directImpact,
+        pm25ExposureReductionPct: r.pm25ExposureReductionPct,
+        co2eSavedKg: r.co2eSavedKg,
+        pm25EmissionAvoidedGrams: r.pm25EmissionAvoidedGrams,
+      });
+    }
+  }
+  for (const h of plan.indoorHacks) {
+    if (selectedSet.has(h.id)) {
+      items.push({
+        id: h.id,
+        category: 'Indoor Hack',
+        title: h.title,
+        directImpact: h.directImpact,
+        pm25ExposureReductionPct: h.pm25ExposureReductionPct,
+        co2eSavedKg: h.co2eSavedKg,
+        pm25EmissionAvoidedGrams: h.pm25EmissionAvoidedGrams,
+      });
+    }
+  }
+  for (const s of plan.sustainableAlternatives) {
+    if (selectedSet.has(s.id)) {
+      items.push({
+        id: s.id,
+        category: 'Sustainable Swap',
+        title: s.sustainableSwap,
+        directImpact: s.directImpact,
+        pm25ExposureReductionPct: s.pm25ExposureReductionPct,
+        co2eSavedKg: s.co2eSavedKg,
+        pm25EmissionAvoidedGrams: s.pm25EmissionAvoidedGrams,
+      });
+    }
+  }
+  return items;
+}
+
 export function sanitizeText(value: unknown, maxLength: number): string {
   if (typeof value !== 'string') return '';
   return value

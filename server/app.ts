@@ -5,7 +5,10 @@
 
 import express, { NextFunction, Request, Response } from 'express';
 import {
+  ActionPlanResponse,
   AirQualitySnapshot,
+  AskQuestionResponse,
+  HouseholdProfile,
   validateAskQuestion,
   validateCityQuery,
   validateCoordinates,
@@ -19,6 +22,24 @@ import {
   answerAirQualityQuestion,
   generateActionPlan,
 } from './services/geminiService.ts';
+
+export interface ApiDependencies {
+  fetchByCity: (city: string) => Promise<AirQualitySnapshot>;
+  fetchByCoords: (lat: number, lon: number) => Promise<AirQualitySnapshot>;
+  generatePlan: (profile: HouseholdProfile, snapshot: AirQualitySnapshot) => Promise<ActionPlanResponse>;
+  askQuestion: (
+    question: string,
+    profile: HouseholdProfile,
+    snapshot: AirQualitySnapshot
+  ) => Promise<AskQuestionResponse>;
+}
+
+const DEFAULT_DEPS: ApiDependencies = {
+  fetchByCity: fetchAirQualityByCity,
+  fetchByCoords: fetchAirQualityByCoords,
+  generatePlan: generateActionPlan,
+  askQuestion: answerAirQualityQuestion,
+};
 
 function isSnapshotLike(raw: unknown): raw is AirQualitySnapshot {
   if (!raw || typeof raw !== 'object') return false;
@@ -34,13 +55,42 @@ function isSnapshotLike(raw: unknown): raw is AirQualitySnapshot {
   );
 }
 
-export function createApiApp(): express.Express {
+/**
+ * Lightweight bounded sliding-window rate limiter to protect AI routes from bursts.
+ */
+export function createRateLimiter(maxRequests = 30, windowMs = 5 * 60 * 1000) {
+  const hits = new Map<string, number[]>();
+
+  return (req: Request, res: Response, next: NextFunction): void => {
+    const key = req.ip || req.socket.remoteAddress || 'local';
+    const now = Date.now();
+    const recent = (hits.get(key) ?? []).filter((ts) => now - ts < windowMs);
+
+    if (recent.length >= maxRequests) {
+      res.status(429).json({
+        error: 'Rate limit exceeded for AI assistant requests. Please wait a moment and try again.',
+      });
+      return;
+    }
+
+    recent.push(now);
+    if (hits.size > 500) {
+      const oldestKey = hits.keys().next().value;
+      if (oldestKey !== undefined) hits.delete(oldestKey);
+    }
+    hits.set(key, recent);
+    next();
+  };
+}
+
+export function createApiApp(overrides: Partial<ApiDependencies> = {}): express.Express {
+  const deps: ApiDependencies = { ...DEFAULT_DEPS, ...overrides };
   const app = express();
+  const aiRateLimit = createRateLimiter(30, 5 * 60 * 1000);
 
   app.disable('x-powered-by');
   app.use(express.json({ limit: '32kb' }));
 
-  // Hardened HTTP security headers compatible with iframe preview
   app.use((_req: Request, res: Response, next: NextFunction) => {
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('X-Frame-Options', 'SAMEORIGIN');
@@ -64,7 +114,7 @@ export function createApiApp(): express.Express {
       return;
     }
     try {
-      const snapshot = await fetchAirQualityByCity(check.city);
+      const snapshot = await deps.fetchByCity(check.city);
       res.json(snapshot);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unable to fetch air quality data.';
@@ -80,7 +130,7 @@ export function createApiApp(): express.Express {
       return;
     }
     try {
-      const snapshot = await fetchAirQualityByCoords(check.lat, check.lon);
+      const snapshot = await deps.fetchByCoords(check.lat, check.lon);
       res.json(snapshot);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unable to fetch local coordinates air data.';
@@ -88,7 +138,7 @@ export function createApiApp(): express.Express {
     }
   });
 
-  app.post('/api/assistant/plan', async (req: Request, res: Response) => {
+  app.post('/api/assistant/plan', aiRateLimit, async (req: Request, res: Response) => {
     const body = req.body as Record<string, unknown> | undefined;
     const profileCheck = validateHouseholdProfile(body?.profile);
     if (!profileCheck.ok) {
@@ -99,9 +149,9 @@ export function createApiApp(): express.Express {
     try {
       const snapshot = isSnapshotLike(body?.airQuality)
         ? body.airQuality
-        : await fetchAirQualityByCity(profileCheck.profile.city);
+        : await deps.fetchByCity(profileCheck.profile.city);
 
-      const plan = await generateActionPlan(profileCheck.profile, snapshot);
+      const plan = await deps.generatePlan(profileCheck.profile, snapshot);
       res.json(plan);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to generate action plan.';
@@ -110,7 +160,7 @@ export function createApiApp(): express.Express {
     }
   });
 
-  app.post('/api/assistant/ask', async (req: Request, res: Response) => {
+  app.post('/api/assistant/ask', aiRateLimit, async (req: Request, res: Response) => {
     const body = req.body as Record<string, unknown> | undefined;
     const questionCheck = validateAskQuestion(body?.question);
     if (!questionCheck.ok) {
@@ -126,9 +176,9 @@ export function createApiApp(): express.Express {
     try {
       const snapshot = isSnapshotLike(body?.airQuality)
         ? body.airQuality
-        : await fetchAirQualityByCity(profileCheck.profile.city);
+        : await deps.fetchByCity(profileCheck.profile.city);
 
-      const answer = await answerAirQualityQuestion(
+      const answer = await deps.askQuestion(
         questionCheck.question,
         profileCheck.profile,
         snapshot
@@ -141,7 +191,6 @@ export function createApiApp(): express.Express {
     }
   });
 
-  // Explicit JSON payload parse error handler
   app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
     res.status(400).json({ error: err.message || 'Malformed JSON request payload.' });
   });

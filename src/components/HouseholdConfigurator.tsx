@@ -5,15 +5,18 @@
 
 import { Sparkles } from 'lucide-react';
 import {
+  AirQualitySnapshot,
   CommuteMode,
   FiltrationSetup,
   HeatingSource,
   HomeType,
   HouseholdProfile,
+  analyzeHouseholdEmissionProfile,
 } from '../shared/airQuality';
 
 interface HouseholdConfiguratorProps {
   profile: HouseholdProfile;
+  snapshot: AirQualitySnapshot | null;
   onChange: (next: HouseholdProfile) => void;
   onSubmit: () => void;
   isGenerating: boolean;
@@ -21,6 +24,7 @@ interface HouseholdConfiguratorProps {
 
 export function HouseholdConfigurator({
   profile,
+  snapshot,
   onChange,
   onSubmit,
   isGenerating,
@@ -28,6 +32,8 @@ export function HouseholdConfigurator({
   const updateField = <K extends keyof HouseholdProfile>(key: K, value: HouseholdProfile[K]) => {
     onChange({ ...profile, [key]: value });
   };
+
+  const diagnostic = analyzeHouseholdEmissionProfile(profile, snapshot);
 
   return (
     <section
@@ -46,8 +52,8 @@ export function HouseholdConfigurator({
               target your real emission and exposure sources.
             </p>
           </div>
-          <span className="text-xs text-slate-500 whitespace-nowrap">
-            Active city: <strong className="font-semibold text-slate-800">{profile.city}</strong>
+          <span className="text-xs text-slate-600 whitespace-nowrap">
+            Active city: <strong className="font-semibold text-slate-900">{profile.city}</strong>
           </span>
         </div>
 
@@ -58,7 +64,6 @@ export function HouseholdConfigurator({
           }}
           className="mt-6 space-y-6"
         >
-          {/* Row 1: Household Composition */}
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <div>
               <label htmlFor="adults-input" className="block text-xs font-medium text-slate-700">
@@ -118,7 +123,6 @@ export function HouseholdConfigurator({
             </div>
           </div>
 
-          {/* Row 2: Housing, Heating, Commute, Filtration */}
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <div>
               <label htmlFor="home-type-select" className="block text-xs font-medium text-slate-700">
@@ -189,7 +193,27 @@ export function HouseholdConfigurator({
             </div>
           </div>
 
-          {/* Row 3: Lifestyle Notes + Submit */}
+          {/* Live Household Exposure & Source Diagnostic Strip */}
+          <div className="grid grid-cols-1 gap-4 border-y border-slate-100 py-4 md:grid-cols-3">
+            <div>
+              <p className="text-xs font-medium text-slate-600">Household Risk Share Breakdown</p>
+              <p className="mt-1 font-mono text-sm font-semibold text-slate-900 tabular-nums">
+                Heating {diagnostic.heatingSharePct}% · Commute {diagnostic.commuteSharePct}% ·
+                Infiltration {diagnostic.infiltrationSharePct}%
+              </p>
+            </div>
+            <div>
+              <p className="text-xs font-medium text-slate-600">Primary Local Emission Driver</p>
+              <p className="mt-1 text-sm font-medium text-slate-900">{diagnostic.topEmissionSource}</p>
+            </div>
+            <div>
+              <p className="text-xs font-medium text-slate-600">Indoor Filtration Baseline</p>
+              <p className="mt-1 text-sm font-medium text-slate-900">
+                {diagnostic.filtrationEfficiencyLabel}
+              </p>
+            </div>
+          </div>
+
           <div className="flex flex-col gap-4 sm:flex-row sm:items-end">
             <div className="flex-1">
               <label htmlFor="lifestyle-notes-input" className="block text-xs font-medium text-slate-700">
@@ -202,7 +226,7 @@ export function HouseholdConfigurator({
                 value={profile.lifestyleNotes}
                 onChange={(e) => updateField('lifestyleNotes', e.target.value)}
                 placeholder="e.g., 7:45 AM school drop-off, afternoon dog walk, older apartment windows"
-                className="mt-1.5 min-h-[44px] w-full rounded-lg border border-slate-300 bg-white px-3.5 text-sm text-slate-900 placeholder:text-slate-400 focus:border-teal-700 focus:outline-none"
+                className="mt-1.5 min-h-[44px] w-full rounded-lg border border-slate-300 bg-white px-3.5 text-sm text-slate-900 placeholder:text-slate-500 focus:border-teal-700 focus:outline-none"
               />
             </div>
 

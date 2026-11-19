@@ -17,7 +17,8 @@ import {
   Wind,
 } from 'lucide-react';
 import { motion } from 'motion/react';
-import { AirQualitySnapshot, classifyAqi } from '../shared/airQuality';
+import { AirQualitySnapshot, HouseholdProfile, classifyAqi } from '../shared/airQuality';
+import { FamilySafetyMatrix } from './FamilySafetyMatrix';
 import { SmogTimelineChart } from './SmogTimelineChart';
 
 const WINTER_CITIES = [
@@ -31,8 +32,11 @@ const WINTER_CITIES = [
 
 interface HeroTelemetryProps {
   snapshot: AirQualitySnapshot | null;
+  profile: HouseholdProfile;
   isLoading: boolean;
   error: string | null;
+  isSevereSmogMode: boolean;
+  onToggleSevereSmogMode: () => void;
   onSelectCity: (city: string) => void;
   onUseCurrentLocation: () => void;
   isLocating: boolean;
@@ -47,8 +51,11 @@ function StatusGlyph({ symbol, className }: { symbol: 'check' | 'info' | 'alert'
 
 export function HeroTelemetry({
   snapshot,
+  profile,
   isLoading,
   error,
+  isSevereSmogMode,
+  onToggleSevereSmogMode,
   onSelectCity,
   onUseCurrentLocation,
   isLocating,
@@ -73,9 +80,7 @@ export function HeroTelemetry({
 
   return (
     <section id="overview" className="mx-auto max-w-7xl px-4 pt-8 pb-6 sm:px-6 lg:px-8">
-      {/* 2-Column Balanced Hero Split */}
       <div className="grid grid-cols-1 gap-8 lg:grid-cols-12 lg:items-stretch">
-        {/* Left Column: Location Search + Situation Summary */}
         <motion.div
           initial={{ opacity: 0, y: 12 }}
           animate={{ opacity: 1, y: 0 }}
@@ -83,10 +88,48 @@ export function HeroTelemetry({
           className="flex flex-col justify-between rounded-2xl border border-slate-200 bg-white p-6 sm:p-8 lg:col-span-6"
         >
           <div>
-            <p className="text-xs font-medium text-teal-800">
-              Winter Atmospheric &amp; Household Guidance
-            </p>
-            <h1 className="mt-2 font-display text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl [text-wrap:balance]">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="text-xs font-semibold text-teal-800">
+                Winter Atmospheric &amp; Household Guidance
+              </p>
+
+              <div
+                role="group"
+                aria-label="Air quality data mode"
+                className="inline-flex rounded-lg bg-slate-100 p-1"
+              >
+                <button
+                  type="button"
+                  aria-pressed={!isSevereSmogMode}
+                  onClick={() => {
+                    if (isSevereSmogMode) onToggleSevereSmogMode();
+                  }}
+                  className={`min-h-[32px] rounded-md px-2.5 py-1 text-xs font-medium transition-colors whitespace-nowrap ${
+                    !isSevereSmogMode
+                      ? 'bg-white text-slate-900 shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  Live Data
+                </button>
+                <button
+                  type="button"
+                  aria-pressed={isSevereSmogMode}
+                  onClick={() => {
+                    if (!isSevereSmogMode) onToggleSevereSmogMode();
+                  }}
+                  className={`min-h-[32px] rounded-md px-2.5 py-1 text-xs font-medium transition-colors whitespace-nowrap ${
+                    isSevereSmogMode
+                      ? 'bg-rose-700 text-white shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  Severe Smog Drill (AQI 218)
+                </button>
+              </div>
+            </div>
+
+            <h1 className="mt-3 font-display text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl [text-wrap:balance]">
               Navigate winter smog with clear, low-emission daily choices
             </h1>
             <p className="mt-3 max-w-xl text-base leading-relaxed text-slate-600">
@@ -95,7 +138,6 @@ export function HeroTelemetry({
               and breathes.
             </p>
 
-            {/* Location Selector Form */}
             <form onSubmit={handleSubmit} className="mt-6" aria-label="Select city for live air quality">
               <label htmlFor="city-search-input" className="block text-xs font-medium text-slate-700">
                 City or urban valley
@@ -103,16 +145,17 @@ export function HeroTelemetry({
               <div className="mt-1.5 flex flex-col gap-2 sm:flex-row">
                 <div className="relative flex-1">
                   <Search
-                    className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400"
+                    className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500"
                     aria-hidden="true"
                   />
                   <input
                     id="city-search-input"
                     type="text"
+                    autoComplete="address-level2"
                     value={cityInput}
                     onChange={(e) => setCityInput(e.target.value)}
                     placeholder="Enter city (e.g., Salt Lake City, Milan, Seoul)"
-                    className="min-h-[44px] w-full rounded-lg border border-slate-300 bg-white pl-9 pr-3 text-sm text-slate-900 placeholder:text-slate-400 focus:border-teal-700 focus:outline-none"
+                    className="min-h-[44px] w-full rounded-lg border border-slate-300 bg-white pl-9 pr-3 text-sm text-slate-900 placeholder:text-slate-500 focus:border-teal-700 focus:outline-none"
                   />
                 </div>
                 <button
@@ -139,9 +182,8 @@ export function HeroTelemetry({
               </div>
             </form>
 
-            {/* Quick City Presets */}
             <div className="mt-4 flex flex-wrap items-center gap-2" role="group" aria-label="Quick winter smog city presets">
-              <span className="text-xs text-slate-500 mr-1">Winter benchmarks:</span>
+              <span className="mr-1 text-xs text-slate-600">Winter benchmarks:</span>
               {WINTER_CITIES.map((city) => {
                 const active = snapshot?.locationName.toLowerCase() === city.toLowerCase();
                 return (
@@ -152,10 +194,10 @@ export function HeroTelemetry({
                       setCityInput(city);
                       onSelectCity(city);
                     }}
-                    className={`min-h-[32px] rounded-md px-2.5 py-1 text-xs font-medium transition-colors whitespace-nowrap shrink-0 ${
+                    className={`min-h-[36px] rounded-md px-2.5 py-1 text-xs font-medium transition-colors whitespace-nowrap shrink-0 ${
                       active
-                        ? 'bg-teal-50 text-teal-900 border border-teal-300'
-                        : 'bg-slate-100 text-slate-700 hover:bg-slate-200 border border-transparent'
+                        ? 'border border-teal-300 bg-teal-50 text-teal-900'
+                        : 'border border-transparent bg-slate-100 text-slate-700 hover:bg-slate-200'
                     }`}
                   >
                     {city}
@@ -165,7 +207,6 @@ export function HeroTelemetry({
             </div>
           </div>
 
-          {/* Live Error or Active Advisory Strip */}
           <div className="mt-6 border-t border-slate-100 pt-4" aria-live="polite">
             {error ? (
               <div role="alert" className="flex items-start gap-2.5 rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-900">
@@ -178,17 +219,17 @@ export function HeroTelemetry({
                 <div className="text-sm">
                   <p className={`font-semibold ${aqiMeta.textClass}`}>
                     {snapshot.locationName} ({snapshot.regionLabel}) — {aqiMeta.label}
+                    {snapshot.isSimulatedEpisode ? ' (Severe Episode Drill)' : ''}
                   </p>
                   <p className="mt-0.5 text-slate-700">{aqiMeta.shortGuidance}</p>
                 </div>
               </div>
             ) : (
-              <div className="h-14 animate-pulse rounded-lg bg-slate-100" />
+              <div role="status" aria-label="Loading local air quality" className="h-14 animate-pulse rounded-lg bg-slate-100" />
             )}
           </div>
         </motion.div>
 
-        {/* Right Column: Atmospheric Winter Inversion Visual */}
         <motion.div
           initial={{ opacity: 0, y: 12 }}
           animate={{ opacity: 1, y: 0 }}
@@ -207,13 +248,12 @@ export function HeroTelemetry({
             <div className="flex h-full min-h-[280px] w-full flex-col items-center justify-center bg-gradient-to-br from-slate-800 to-slate-900 p-8 text-center text-slate-200">
               <ThermometerSnowflake className="h-10 w-10 text-teal-400" aria-hidden="true" />
               <p className="mt-3 font-display text-lg font-semibold">Winter Thermal Inversion Layer</p>
-              <p className="mt-1 max-w-sm text-sm text-slate-400">
+              <p className="mt-1 max-w-sm text-sm text-slate-300">
                 Cold surface air traps urban particulates beneath warmer air aloft.
               </p>
             </div>
           )}
 
-          {/* Measured Contrast Scrim */}
           <div className="absolute inset-0 bg-gradient-to-t from-slate-950/90 via-slate-950/35 to-transparent" />
 
           <div className="absolute bottom-0 left-0 right-0 p-6 text-white">
@@ -232,7 +272,7 @@ export function HeroTelemetry({
       {/* Full-Width 4-Column Live Telemetry Strip */}
       <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <div className="rounded-xl border border-slate-200 bg-white p-5">
-          <p className="text-xs font-medium text-slate-500">Live US AQI</p>
+          <p className="text-xs font-medium text-slate-600">US AQI</p>
           <div className="mt-2 flex items-baseline justify-between gap-2">
             <span className="font-mono text-3xl font-bold text-slate-900 tabular-nums">
               {snapshot ? snapshot.usAqi : '—'}
@@ -247,12 +287,12 @@ export function HeroTelemetry({
         </div>
 
         <div className="rounded-xl border border-slate-200 bg-white p-5">
-          <p className="text-xs font-medium text-slate-500">Fine Particulates (PM2.5)</p>
+          <p className="text-xs font-medium text-slate-600">Fine Particulates (PM2.5)</p>
           <div className="mt-2 flex items-baseline gap-1.5">
             <span className="font-mono text-3xl font-bold text-slate-900 tabular-nums">
               {snapshot ? snapshot.pm25 : '—'}
             </span>
-            <span className="font-mono text-xs text-slate-500">µg/m³</span>
+            <span className="font-mono text-xs text-slate-600">µg/m³</span>
           </div>
           <p className="mt-2 text-xs text-slate-600 font-mono tabular-nums">
             {snapshot
@@ -262,7 +302,7 @@ export function HeroTelemetry({
         </div>
 
         <div className="rounded-xl border border-slate-200 bg-white p-5">
-          <p className="text-xs font-medium text-slate-500">Thermal Inversion Risk</p>
+          <p className="text-xs font-medium text-slate-600">Thermal Inversion Risk</p>
           <div className="mt-2 flex items-baseline justify-between gap-2">
             <span className="font-display text-2xl font-bold text-slate-900">
               {snapshot ? snapshot.inversionRisk.level : '—'}
@@ -272,13 +312,13 @@ export function HeroTelemetry({
             </span>
           </div>
           <p className="mt-2 inline-flex items-center gap-1.5 text-xs text-slate-600 font-mono tabular-nums">
-            <Wind className="h-3.5 w-3.5 text-slate-500" aria-hidden="true" />
+            <Wind className="h-3.5 w-3.5 text-slate-600" aria-hidden="true" />
             {snapshot ? `${snapshot.temperatureC}°C · Wind ${snapshot.windSpeedKmh} km/h` : 'Calculating'}
           </p>
         </div>
 
         <div className="rounded-xl border border-slate-200 bg-white p-5">
-          <p className="text-xs font-medium text-slate-500">Cleanest 2-Hour Window</p>
+          <p className="text-xs font-medium text-slate-600">Cleanest 2-Hour Window</p>
           <div className="mt-2 flex items-baseline justify-between gap-2">
             <span className="font-mono text-2xl font-bold text-teal-800 tabular-nums">
               {snapshot
@@ -294,9 +334,9 @@ export function HeroTelemetry({
         </div>
       </div>
 
-      {/* 24-Hour Smog Dispersion Curve */}
       {snapshot && (
-        <div className="mt-6">
+        <div className="mt-6 space-y-6">
+          <FamilySafetyMatrix snapshot={snapshot} profile={profile} />
           <SmogTimelineChart hourly={snapshot.hourly} cleanestWindow={snapshot.cleanestWindow} />
         </div>
       )}

@@ -6,9 +6,17 @@
 import { describe, expect, it } from 'vitest';
 import {
   ActionPlanResponse,
+  AirQualitySnapshot,
+  HouseholdProfile,
+  analyzeHouseholdEmissionProfile,
+  buildFamilySafetyMatrix,
+  calculateCommunityImpact,
   calculateInversionRisk,
   classifyAqi,
+  createSevereSmogScenario,
   findCleanestVentilationWindow,
+  formatShareableBulletin,
+  getAdoptedImpactBreakdown,
   HourlyForecastPoint,
   sanitizeText,
   simulateActionImpact,
@@ -17,6 +25,102 @@ import {
   validateCoordinates,
   validateHouseholdProfile,
 } from '../src/shared/airQuality';
+
+const SAMPLE_PROFILE: HouseholdProfile = {
+  city: 'Salt Lake City',
+  adults: 2,
+  children: 1,
+  seniors: 0,
+  respiratorySensitivity: true,
+  homeType: 'apartment',
+  heatingSource: 'wood_or_coal',
+  commuteMode: 'private_car',
+  filtrationSetup: 'none',
+  lifestyleNotes: 'Morning school drop-off',
+};
+
+const SAMPLE_PLAN: ActionPlanResponse = {
+  generatedAtIso: '2026-11-19T08:00:00Z',
+  advisoryHeadline: 'Keep windows sealed until 13:00 and prioritize HEPA circulation.',
+  advisorySummary: 'Morning thermal inversion traps particulates at street level.',
+  whyLocationMatters: 'Valley topography slows morning dispersion.',
+  routines: [
+    {
+      id: 'r1',
+      timeWindow: '07:30–09:00',
+      title: 'Shift outdoor errands to afternoon window',
+      guidance: 'Avoid brisk outdoor activity during peak morning rush.',
+      directImpact: 'Cuts inhaled fine particulate dose during peak inversion.',
+      pm25ExposureReductionPct: 25,
+      co2eSavedKg: 1.5,
+      pm25EmissionAvoidedGrams: 0.8,
+    },
+  ],
+  indoorHacks: [
+    {
+      id: 'h1',
+      title: 'Run continuous HEPA purifier in bedroom',
+      difficulty: 'Low-Cost DIY',
+      stepByStep: 'Place unit away from walls on medium continuous setting.',
+      directImpact: 'Captures fine aerosols before deep lung inhalation.',
+      pm25ExposureReductionPct: 40,
+      co2eSavedKg: 0.0,
+      pm25EmissionAvoidedGrams: 0.0,
+    },
+  ],
+  sustainableAlternatives: [
+    {
+      id: 'a1',
+      currentHabit: 'Solo cold-start car trips',
+      sustainableSwap: 'Batch errands or ride rail transit',
+      whyItHelps: 'Cold engines emit peak winter particulates in the first 3 km.',
+      directImpact: 'Eliminates cold-start tailpipe exhaust near schools.',
+      pm25ExposureReductionPct: 10,
+      co2eSavedKg: 3.2,
+      pm25EmissionAvoidedGrams: 2.4,
+    },
+  ],
+  communityActions: [
+    {
+      id: 'c1',
+      title: 'Idle-free school drop-off zone',
+      whoCanJoin: 'Parents and teachers',
+      actionSummary: 'Turn off engines while waiting outside school gates.',
+      collectiveImpact: 'Cuts morning NO2 and PM2.5 spikes at child breathing height.',
+    },
+  ],
+};
+
+const BASE_SNAPSHOT: AirQualitySnapshot = {
+  locationName: 'Milan',
+  regionLabel: 'Lombardy, Italy',
+  latitude: 45.46,
+  longitude: 9.19,
+  observedAtIso: '2026-11-19T09:00',
+  usAqi: 42,
+  pm25: 10.2,
+  pm10: 14.5,
+  no2: 22.0,
+  so2: 2.1,
+  co: 190,
+  temperatureC: 9.0,
+  humidityPct: 60,
+  windSpeedKmh: 16.0,
+  inversionRisk: {
+    level: 'Low',
+    score: 20,
+    summary: 'Active airflow',
+    trappingMechanism: 'Moderate winds disperse emissions.',
+  },
+  cleanestWindow: {
+    startHour: '13:00',
+    endHour: '14:00',
+    avgPm25: 9.0,
+    avgAqi: 38,
+    recommendation: 'Good window for ventilation.',
+  },
+  hourly: [],
+};
 
 describe('AQI Classification & Thermal Inversion Physics', () => {
   it('classifies US AQI thresholds with explicit text labels and non-hue symbols', () => {
@@ -65,56 +169,28 @@ describe('AQI Classification & Thermal Inversion Physics', () => {
     expect(window.avgPm25).toBe(13);
     expect(window.avgAqi).toBe(53);
   });
+
+  it('creates a severe winter smog drill scenario preserving city context', () => {
+    const scenario = createSevereSmogScenario(BASE_SNAPSHOT);
+    expect(scenario.locationName).toBe('Milan');
+    expect(scenario.isSimulatedEpisode).toBe(true);
+    expect(scenario.usAqi).toBe(218);
+    expect(scenario.inversionRisk.level).toBe('Severe');
+    expect(scenario.hourly).toHaveLength(24);
+    expect(scenario.cleanestWindow.startHour).toBe('13:00');
+  });
 });
 
-describe('Household Impact Simulator', () => {
-  const samplePlan: ActionPlanResponse = {
-    generatedAtIso: '2026-11-19T08:00:00Z',
-    advisoryHeadline: 'Keep windows sealed until 13:00 and prioritize HEPA circulation.',
-    advisorySummary: 'Morning thermal inversion traps particulates at street level.',
-    whyLocationMatters: 'Valley topography slows morning dispersion.',
-    routines: [
-      {
-        id: 'r1',
-        timeWindow: '07:30–09:00',
-        title: 'Shift outdoor errands to afternoon window',
-        guidance: 'Avoid brisk outdoor activity during peak morning rush.',
-        directImpact: 'Cuts inhaled fine particulate dose during peak inversion.',
-        pm25ExposureReductionPct: 25,
-        co2eSavedKg: 1.5,
-        pm25EmissionAvoidedGrams: 0.8,
-      },
-    ],
-    indoorHacks: [
-      {
-        id: 'h1',
-        title: 'Run continuous HEPA purifier in bedroom',
-        difficulty: 'Low-Cost DIY',
-        stepByStep: 'Place unit away from walls on medium continuous setting.',
-        directImpact: 'Captures fine aerosols before deep lung inhalation.',
-        pm25ExposureReductionPct: 40,
-        co2eSavedKg: 0.0,
-        pm25EmissionAvoidedGrams: 0.0,
-      },
-    ],
-    sustainableAlternatives: [
-      {
-        id: 'a1',
-        currentHabit: 'Solo cold-start car trips',
-        sustainableSwap: 'Batch errands or ride rail transit',
-        whyItHelps: 'Cold engines emit peak winter particulates in the first 3 km.',
-        directImpact: 'Eliminates cold-start tailpipe exhaust near schools.',
-        pm25ExposureReductionPct: 10,
-        co2eSavedKg: 3.2,
-        pm25EmissionAvoidedGrams: 2.4,
-      },
-    ],
-    communityActions: [],
-  };
+describe('Household Diagnostics, Impact Simulator & Community Multiplier', () => {
+  it('attributes household risk shares accurately across heating, commute, and filtration', () => {
+    const diag = analyzeHouseholdEmissionProfile(SAMPLE_PROFILE, BASE_SNAPSHOT);
+    expect(diag.heatingSharePct + diag.commuteSharePct + diag.infiltrationSharePct).toBe(100);
+    expect(diag.topEmissionSource).toContain('Solid-fuel');
+    expect(diag.filtrationEfficiencyLabel).toContain('None');
+  });
 
   it('uses diminishing-returns physics and sums daily CO2e and PM2.5 savings', () => {
-    const result = simulateActionImpact(['r1', 'h1', 'a1'], samplePlan, 50);
-    // 1 - (0.75 * 0.60 * 0.90) = 1 - 0.405 = 59.5% -> rounded 60%
+    const result = simulateActionImpact(['r1', 'h1', 'a1'], SAMPLE_PLAN, 50);
     expect(result.indoorExposureReductionPct).toBe(60);
     expect(result.selectedCount).toBe(3);
     expect(result.totalActionableCount).toBe(3);
@@ -124,10 +200,41 @@ describe('Household Impact Simulator', () => {
   });
 
   it('returns zero mitigation when no actions are selected', () => {
-    const result = simulateActionImpact([], samplePlan, 40);
+    const result = simulateActionImpact([], SAMPLE_PLAN, 40);
     expect(result.indoorExposureReductionPct).toBe(0);
     expect(result.co2eSavedDailyKg).toBe(0);
     expect(result.projectedIndoorPm25).toBe(26);
+  });
+
+  it('calculates collective neighborhood savings and formats shareable bulletin', () => {
+    const impact = simulateActionImpact(['r1', 'h1', 'a1'], SAMPLE_PLAN, 50);
+    const community = calculateCommunityImpact(impact, 20, 1, 3);
+    expect(community.participatingHouseholds).toBe(20);
+    expect(community.cleanAirProtectedResidents).toBe(60);
+    expect(community.monthlyCo2eAvoidedKg).toBeGreaterThan(impact.co2eSavedMonthlyKg * 20);
+
+    const bulletin = formatShareableBulletin({
+      snapshot: BASE_SNAPSHOT,
+      plan: SAMPLE_PLAN,
+      impact,
+      community,
+    });
+    expect(bulletin).toContain('ClearAir Winter Neighborhood Bulletin — Milan');
+    expect(bulletin).toContain('20 participating households');
+    expect(bulletin).toContain('Idle-free school drop-off zone');
+  });
+
+  it('builds tailored safety directives and adopted causal breakdown items', () => {
+    const severeSnapshot = createSevereSmogScenario(BASE_SNAPSHOT);
+    const directives = buildFamilySafetyMatrix(severeSnapshot, SAMPLE_PROFILE);
+    expect(directives).toHaveLength(4);
+    expect(directives.every((d) => d.status === 'Protect')).toBe(true);
+
+    const breakdown = getAdoptedImpactBreakdown(['r1', 'a1'], SAMPLE_PLAN);
+    expect(breakdown).toHaveLength(2);
+    expect(breakdown[0].category).toBe('Routine');
+    expect(breakdown[1].category).toBe('Sustainable Swap');
+    expect(breakdown[1].directImpact).toContain('cold-start');
   });
 });
 

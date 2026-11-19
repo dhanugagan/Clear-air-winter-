@@ -9,6 +9,7 @@ import {
   AirQualitySnapshot,
   AskQuestionResponse,
   HouseholdProfile,
+  analyzeHouseholdEmissionProfile,
 } from '../../src/shared/airQuality.ts';
 
 function getGeminiClient(): GoogleGenAI {
@@ -51,6 +52,20 @@ async function withExponentialBackoff<T>(fn: () => Promise<T>, maxRetries = 2): 
     }
   }
   throw lastError;
+}
+
+function clampMetric(value: unknown, min: number, max: number, decimals = 1): number {
+  const n = typeof value === 'number' && Number.isFinite(value) ? value : min;
+  const clamped = Math.min(max, Math.max(min, n));
+  const factor = Math.pow(10, decimals);
+  return Math.round(clamped * factor) / factor;
+}
+
+function normalizeDifficulty(raw: unknown): 'Zero-Cost Habit' | 'Low-Cost DIY' | 'Equipment Upgrade' {
+  if (raw === 'Zero-Cost Habit' || raw === 'Low-Cost DIY' || raw === 'Equipment Upgrade') {
+    return raw;
+  }
+  return 'Low-Cost DIY';
 }
 
 const ACTION_PLAN_SCHEMA = {
@@ -204,6 +219,7 @@ export async function generateActionPlan(
   airQuality: AirQualitySnapshot
 ): Promise<ActionPlanResponse> {
   const ai = getGeminiClient();
+  const diagnostics = analyzeHouseholdEmissionProfile(profile, airQuality);
 
   const contextPayload = {
     location: {
@@ -217,9 +233,11 @@ export async function generateActionPlan(
       windSpeedKmh: airQuality.windSpeedKmh,
       humidityPct: airQuality.humidityPct,
       inversionRisk: airQuality.inversionRisk.level,
+      isSimulatedSevereSmogEpisode: Boolean(airQuality.isSimulatedEpisode),
       cleanestWindow: `${airQuality.cleanestWindow.startHour}-${airQuality.cleanestWindow.endHour} (avg PM2.5 ${airQuality.cleanestWindow.avgPm25} µg/m³)`,
     },
     household: profile,
+    diagnosticSummary: diagnostics,
   };
 
   const response = await withExponentialBackoff(() =>
@@ -250,7 +268,35 @@ export async function generateActionPlan(
 
   const parsed = JSON.parse(rawText) as Omit<ActionPlanResponse, 'generatedAtIso'>;
   return {
-    ...parsed,
+    advisoryHeadline: parsed.advisoryHeadline,
+    advisorySummary: parsed.advisorySummary,
+    whyLocationMatters: parsed.whyLocationMatters,
+    routines: (parsed.routines ?? []).map((item, idx) => ({
+      ...item,
+      id: item.id || `routine-${idx + 1}`,
+      pm25ExposureReductionPct: clampMetric(item.pm25ExposureReductionPct, 3, 55, 0),
+      co2eSavedKg: clampMetric(item.co2eSavedKg, 0, 12, 1),
+      pm25EmissionAvoidedGrams: clampMetric(item.pm25EmissionAvoidedGrams, 0, 18, 1),
+    })),
+    indoorHacks: (parsed.indoorHacks ?? []).map((item, idx) => ({
+      ...item,
+      id: item.id || `indoor-${idx + 1}`,
+      difficulty: normalizeDifficulty(item.difficulty),
+      pm25ExposureReductionPct: clampMetric(item.pm25ExposureReductionPct, 3, 60, 0),
+      co2eSavedKg: clampMetric(item.co2eSavedKg, 0, 8, 1),
+      pm25EmissionAvoidedGrams: clampMetric(item.pm25EmissionAvoidedGrams, 0, 15, 1),
+    })),
+    sustainableAlternatives: (parsed.sustainableAlternatives ?? []).map((item, idx) => ({
+      ...item,
+      id: item.id || `alt-${idx + 1}`,
+      pm25ExposureReductionPct: clampMetric(item.pm25ExposureReductionPct, 2, 45, 0),
+      co2eSavedKg: clampMetric(item.co2eSavedKg, 0.1, 15, 1),
+      pm25EmissionAvoidedGrams: clampMetric(item.pm25EmissionAvoidedGrams, 0.1, 20, 1),
+    })),
+    communityActions: (parsed.communityActions ?? []).map((item, idx) => ({
+      ...item,
+      id: item.id || `community-${idx + 1}`,
+    })),
     generatedAtIso: new Date().toISOString(),
   };
 }

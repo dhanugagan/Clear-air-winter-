@@ -1,95 +1,83 @@
 # ClearAir Winter — Urban Air Quality Assistant
 
-ClearAir Winter is a full-stack GenAI-powered assistant designed to help families and communities navigate severe winter smog and urban air pollution. It combines live atmospheric and weather telemetry with tailored household guidance—covering low-emission daily routines, indoor air quality hacks, sustainable lifestyle swaps, and community actions—while clearly quantifying the direct impact of every choice.
+ClearAir Winter is a full-stack GenAI-powered assistant designed to help families and communities navigate severe winter smog and urban air pollution. It combines live atmospheric and weather telemetry with tailored household guidance—covering low-emission daily routines, indoor air quality hacks, sustainable lifestyle alternatives, and neighborhood community actions—while clearly quantifying the direct impact of every choice.
 
 ---
 
-## Key Capabilities & Problem Statement Alignment
+## Problem Statement Alignment
 
-1. **Live Local Air & Winter Inversion Telemetry**
-   - Integrates real-time **Open-Meteo Geocoding, Air Quality, and Weather APIs** (US AQI, PM2.5, PM10, NO₂, SO₂, CO, temperature, humidity, and wind speed).
-   - Computes a physical **Thermal Inversion Risk Index** explaining why cold air and calm winds trap winter smog near street level.
-   - Scans the next 24 hours to identify the **Cleanest 2-Hour Window** for brief cross-ventilation or essential outdoor errands.
-
-2. **Tailored GenAI Household Action Plans (`gemini-4-hydrogen`)**
-   - Adapts recommendations to household composition (adults, children, older adults, asthma/respiratory sensitivity), home structure, heating/cooking fuel, daily commute, and indoor filtration setup.
-   - Generates structured, science-grounded guidance across four categories:
-     - **Low-Emission Daily Routines**: Timing errands and school runs around dispersion curves.
-     - **Indoor Air Quality Hacks**: Zero-cost habits, DIY Corsi-Rosenthal box setups, and HEPA/MERV-13 protocols.
-     - **Sustainable Alternatives**: Practical heating, cooking, and transit swaps with clear causal mechanisms.
-     - **Community Actions**: Collective neighborhood steps such as school idle-free zones and shared clean-air spaces.
-
-3. **Interactive Impact Simulator**
-   - Families toggle individual routines, indoor hacks, and sustainable swaps to see immediate updates to:
-     - **Indoor PM2.5 Exposure Cut (%)** and projected indoor concentration ($\mu\text{g/m}^3$) using a bounded diminishing-returns physical model.
-     - **Daily & Monthly $\text{CO}_2\text{e}$ Avoided (kg)**.
-     - **Direct Particulate Emissions Prevented (g PM2.5/day)**.
-
-4. **Context-Aware Clean-Air Advisor Q&A**
-   - Lets households ask targeted follow-up questions grounded in their city's live telemetry and home configuration.
+| Requirement | Implementation in ClearAir Winter |
+| --- | --- |
+| **Navigate severe winter smog & urban air pollution** | Live Open-Meteo AQI, PM2.5, PM10, NO₂, SO₂, CO, wind, and temperature telemetry paired with a **Thermal Inversion Risk Index**, **Immediate Family Safety Matrix**, **24-Hour Dispersion Curve**, **Cleanest 2-Hour Window** finder, and an interactive **Severe Smog Drill (AQI 218)** mode. |
+| **Low-emission daily routines** | GenAI-generated chronological schedules (`gemini-4-hydrogen` with strict JSON schema) aligned to hourly dispersion valleys and school/commute timing. |
+| **Indoor air quality hacks** | Tiered protocols (*Zero-Cost Habit*, *Low-Cost DIY* Corsi-Rosenthal box, *Equipment Upgrade*) with step-by-step filtration and kitchen ventilation physics. |
+| **Sustainable alternatives tailored to location & lifestyle** | Household diagnostic engine (`analyzeHouseholdEmissionProfile`) attributing heating, commute, and infiltration risk, feeding tailored swaps into the Gemini planner. |
+| **Clearly explain direct impact of choices** | Every card states the causal mechanism (`directImpact`), and the interactive **Choice Impact Simulator** renders a **Direct Causal Breakdown** table alongside before/after indoor PM2.5 ($\mu\text{g/m}^3$), exposure reduction (%), $\text{CO}_2\text{e}$ avoided (kg), and direct PM2.5 smoke prevented (g). |
+| **Empower families & communities** | **Community Clean-Air Multiplier** scales collective impact across 5–50 participating households and exports/copies a ready-to-share **Neighborhood Clean-Air Bulletin**. |
 
 ---
 
 ## Architecture
 
 ```text
-├── server.ts                        # Full-stack Express + Vite server entry point (port 3000)
+├── server.ts                         # Full-stack Express + Vite server entry point (port 3000)
 ├── server/
-│   ├── app.ts                       # Express API router, security headers, strict validation
+│   ├── app.ts                        # Express router, security headers, rate limiter, DI support
 │   └── services/
-│       ├── airQualityService.ts     # Open-Meteo integration + bounded TTL caching
-│       └── geminiService.ts         # Server-side @google/genai client with responseSchema & retries
+│       ├── airQualityService.ts      # Open-Meteo integration + bounded TtlCache
+│       └── geminiService.ts          # Server-side @google/genai client with responseSchema & retries
 ├── src/
-│   ├── shared/airQuality.ts         # Pure domain physics, impact simulator, & validators
+│   ├── shared/airQuality.ts          # Strict domain physics, diagnostics, safety matrix, & validators
+│   ├── services/apiClient.ts         # Typed frontend fetch client with AbortSignal support
 │   ├── components/
-│   │   ├── TopNav.tsx               # 3-zone accessible navigation header
-│   │   ├── HeroTelemetry.tsx        # Location search, GPS lookup, & live metrics
-│   │   ├── SmogTimelineChart.tsx    # Interactive 24h dispersion curve with Motion animations
-│   │   ├── HouseholdConfigurator.tsx# Accessible household & lifestyle form
-│   │   ├── ImpactSimulatorPanel.tsx # Animated exposure & emission impact calculator
-│   │   ├── ActionPlanWorkspace.tsx  # Tabbed action plan with interactive choice adoption
-│   │   └── AskAssistantPanel.tsx    # Context-aware Q&A advisor
-│   └── App.tsx                      # Root orchestrator with MotionConfig reducedMotion="user"
+│   │   ├── ErrorBoundary.tsx         # Resilient React error boundary
+│   │   ├── TopNav.tsx                # 3-zone accessible navigation header + mobile disclosure
+│   │   ├── HeroTelemetry.tsx         # City search, GPS, Severe Smog Drill, & live metrics
+│   │   ├── FamilySafetyMatrix.tsx    # Immediate outdoor, masking, window, & filtration directives
+│   │   ├── SmogTimelineChart.tsx     # Keyboard-navigable 24h dispersion curve with Motion animations
+│   │   ├── HouseholdConfigurator.tsx # Household profile form & live emission diagnostic strip
+│   │   ├── ImpactSimulatorPanel.tsx  # Animated exposure/emission simulator & causal breakdown table
+│   │   ├── ActionChoiceCard.tsx      # Modular accessible action card primitive
+│   │   ├── CommunityMultiplierPanel.tsx # Neighborhood collective impact & bulletin export
+│   │   ├── ActionPlanWorkspace.tsx   # WAI-ARIA keyboard-navigable tabbed plan workspace
+│   │   └── AskAssistantPanel.tsx     # Context-aware Clean-Air Advisor Q&A
+│   └── App.tsx                       # Root orchestrator wrapped in ErrorBoundary & MotionConfig
 └── tests/
-    ├── airQuality.test.ts           # Unit tests for physics, impact math, & sanitization
-    └── api.test.ts                  # Express route, security header, & cache tests
+    ├── airQuality.test.ts            # Unit tests for physics, diagnostics, safety matrix, & sanitization
+    ├── api.test.ts                   # Express route, security header, rate limiter, & cache tests
+    ├── services.test.ts              # Open-Meteo service parsing, caching, & Gemini key guard tests
+    └── components.test.tsx           # React Testing Library UI, keyboard a11y, & ErrorBoundary tests
 ```
 
 ---
 
-## Security & Privacy Controls
+## Engineering Standards
 
-- **Server-Side AI Execution**: All `@google/genai` calls execute exclusively on the Express backend (`server/services/geminiService.ts`); `GEMINI_API_KEY` is never exposed to client bundles.
-- **Strict Input Validation & Sanitization**: City names, geographic coordinates, household profiles, and user questions are validated against strict allowlists, length limits, and numeric bounds (`src/shared/airQuality.ts`), stripping control characters and angle brackets.
-- **Prompt Framing Hardening**: Untrusted user inputs are serialized into delimited JSON payloads rather than interpolated directly into system instructions.
-- **HTTP Hardening**: Express disables `x-powered-by`, enforces a `32kb` JSON body limit, and sets `X-Content-Type-Options: nosniff`, `X-Frame-Options: SAMEORIGIN`, `Referrer-Policy`, and `Permissions-Policy`.
+### Code Quality
+- Strict TypeScript (`"strict": true`, `"noUnusedLocals": true`, `"noUnusedParameters": true`) across client, server, and shared modules.
+- Clean separation of concerns: pure domain physics (`src/shared/airQuality.ts`), typed HTTP client (`src/services/apiClient.ts`), backend services (`server/services/*`), modular React components (`ActionChoiceCard`, `CommunityMultiplierPanel`, `FamilySafetyMatrix`), and resilient `ErrorBoundary`.
 
----
+### Security
+- **Server-Side AI Execution**: All `@google/genai` calls execute strictly on the Express backend; `GEMINI_API_KEY` is never exposed to client bundles.
+- **Validation & Sanitization**: Allowlist regexes, enum validation, length limits, coordinate bounds, and HTML/control-character stripping on every endpoint.
+- **Abuse & Header Hardening**: `32kb` JSON body limit, sliding-window AI endpoint rate limiter (`429`), disabled `x-powered-by`, and `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, and `Permissions-Policy` headers.
 
-## Efficiency & Performance
+### Efficiency
+- Bounded `TtlCache` (60-minute geocoding cache, 5-minute environmental snapshot cache) prevents redundant upstream API calls.
+- Client `AbortController` cancellation and server `AbortSignal.timeout(8000)` eliminate stale race conditions.
+- Compositor-only `motion/react` animations (`transform`, `opacity`).
 
-- **Bounded TTL Caching**: `TtlCache` caches geocoding lookups (60 min) and environmental snapshots (5 min) with a strict entry cap to prevent redundant upstream API calls and unbounded memory growth.
-- **Request Cancellation & Timeouts**: Client fetches use `AbortController` to cancel superseded city lookups, and server upstream requests enforce `AbortSignal.timeout(8000)`.
-- **Compositor-Only Animations**: UI transitions via `motion/react` animate only `transform` and `opacity` for 60fps rendering.
-
----
-
-## Accessibility (WCAG AA)
-
-- **Keyboard & Screen-Reader Ready**: Semantic landmarks (`<header>`, `<main>`, `<nav>`, `<section>`, `<footer>`), skip-to-content link, `role="tablist"` / `role="tab"`, `aria-pressed` toggles, and `aria-live="polite"` status updates.
-- **Non-Hue-Only Signaling**: Every AQI and inversion risk level pairs semantic color with explicit text labels and icons.
-- **Motion Sensitivity**: Wrapped in `<MotionConfig reducedMotion="user">` alongside `@media (prefers-reduced-motion: reduce)`.
-- **Touch Targets & Contrast**: Minimum `40px–44px` interactive controls and high-contrast slate/teal typography with tabular numerals (`tabular-nums`).
+### Accessibility (WCAG AA/AAA)
+- Strict `h1 -> h2 -> h3 -> h4` heading hierarchy with zero skipped levels.
+- Semantic landmarks, skip-to-main-content link, accessible mobile navigation disclosure (`aria-expanded`), full WAI-ARIA `tablist`/`tab`/`tabpanel` keyboard navigation (`ArrowLeft`, `ArrowRight`, `Home`, `End`), keyboard-navigable 24-hour dispersion bars, `role="progressbar"`, `aria-live="polite"` feedback regions, non-hue-only status indicators, and `<MotionConfig reducedMotion="user">`.
 
 ---
 
 ## Automated Testing & Verification
 
-Run the test suite, TypeScript type-check, and production build:
-
 ```bash
-npm test        # Runs Vitest unit and API integration tests
-npm run lint    # Runs tsc --noEmit type checking
+npm test        # Runs Vitest unit, service, API integration, and React UI/a11y suites
+npm run lint    # Runs strict tsc --noEmit verification
 npm run build   # Builds optimized Vite production bundle
 ```
 
@@ -98,5 +86,5 @@ npm run build   # Builds optimized Vite production bundle
 ## Local Development
 
 1. Install dependencies: `npm install`
-2. Set `GEMINI_API_KEY` in your environment or AI Studio Secrets panel.
+2. Configure `GEMINI_API_KEY` in environment variables or AI Studio Secrets.
 3. Start the full-stack server on port `3000`: `npm run dev`

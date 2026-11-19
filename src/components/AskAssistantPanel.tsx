@@ -6,6 +6,7 @@
 import { FormEvent, useState } from 'react';
 import { MessageSquare, Send } from 'lucide-react';
 import { motion } from 'motion/react';
+import { askAirQualityAdvisorApi } from '../services/apiClient';
 import {
   AirQualitySnapshot,
   AskQuestionResponse,
@@ -41,20 +42,8 @@ export function AskAssistantPanel({ snapshot, profile }: AskAssistantPanelProps)
     setError(null);
 
     try {
-      const res = await fetch('/api/assistant/ask', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          question: trimmed,
-          profile,
-          airQuality: snapshot,
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error || 'Could not retrieve an answer.');
-      }
-      setResponse(data as AskQuestionResponse);
+      const data = await askAirQualityAdvisorApi(trimmed, profile, snapshot);
+      setResponse(data);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to contact advisor.');
     } finally {
@@ -84,13 +73,12 @@ export function AskAssistantPanel({ snapshot, profile }: AskAssistantPanelProps)
               PM2.5 ({snapshot ? `${snapshot.pm25} µg/m³` : '—'}) and your home profile.
             </p>
           </div>
-          <span className="inline-flex items-center gap-1.5 text-xs text-slate-500">
+          <span className="inline-flex items-center gap-1.5 text-xs text-slate-600">
             <MessageSquare className="h-3.5 w-3.5 text-teal-700" aria-hidden="true" />
             Context-aware guidance
           </span>
         </div>
 
-        {/* Starter Question Buttons */}
         <div className="mt-5 flex flex-wrap gap-2" role="group" aria-label="Suggested questions">
           {SAMPLE_QUESTIONS.map((q) => (
             <button
@@ -119,7 +107,7 @@ export function AskAssistantPanel({ snapshot, profile }: AskAssistantPanelProps)
             value={question}
             onChange={(e) => setQuestion(e.target.value)}
             placeholder="Ask about outdoor exercise timing, stove ventilation, mask fit, or commuting..."
-            className="min-h-[44px] flex-1 rounded-lg border border-slate-300 bg-white px-4 text-sm text-slate-900 placeholder:text-slate-400 focus:border-teal-700 focus:outline-none"
+            className="min-h-[44px] flex-1 rounded-lg border border-slate-300 bg-white px-4 text-sm text-slate-900 placeholder:text-slate-500 focus:border-teal-700 focus:outline-none"
           />
           <button
             type="submit"
@@ -147,7 +135,7 @@ export function AskAssistantPanel({ snapshot, profile }: AskAssistantPanelProps)
               initial={{ opacity: 0, y: 6 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
-              className="rounded-xl border border-slate-200 bg-slate-50 p-5 space-y-4"
+              className="space-y-4 rounded-xl border border-slate-200 bg-slate-50 p-5"
             >
               <p className="text-sm leading-relaxed text-slate-800">{response.answer}</p>
 

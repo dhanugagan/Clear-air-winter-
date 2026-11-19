@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useState } from 'react';
+import { KeyboardEvent, useRef, useState } from 'react';
 import { motion } from 'motion/react';
 import { HourlyForecastPoint, VentilationWindow, classifyAqi } from '../shared/airQuality';
 
@@ -14,18 +14,34 @@ interface SmogTimelineChartProps {
 
 export function SmogTimelineChart({ hourly, cleanestWindow }: SmogTimelineChartProps) {
   const [activeIndex, setActiveIndex] = useState<number>(0);
+  const barButtonsRef = useRef<Array<HTMLButtonElement | null>>([]);
 
   if (!hourly.length) {
     return (
-      <div className="rounded-xl border border-slate-200 bg-white p-6 text-sm text-slate-600">
+      <div className="rounded-xl border border-slate-200 bg-white p-6 text-sm text-slate-700">
         Hourly dispersion forecast is currently unavailable for this station.
       </div>
     );
   }
 
-  const maxPm25 = Math.max(45, ...hourly.map((point) => point.pm25));
-  const activePoint = hourly[Math.min(activeIndex, hourly.length - 1)];
+  const visibleHours = hourly.slice(0, 24);
+  const maxPm25 = Math.max(45, ...visibleHours.map((point) => point.pm25));
+  const activePoint = visibleHours[Math.min(activeIndex, visibleHours.length - 1)];
   const activeClass = classifyAqi(activePoint.usAqi);
+
+  const handleBarKeyDown = (e: KeyboardEvent<HTMLButtonElement>, index: number) => {
+    let nextIndex: number | null = null;
+    if (e.key === 'ArrowRight') nextIndex = (index + 1) % visibleHours.length;
+    else if (e.key === 'ArrowLeft') nextIndex = (index - 1 + visibleHours.length) % visibleHours.length;
+    else if (e.key === 'Home') nextIndex = 0;
+    else if (e.key === 'End') nextIndex = visibleHours.length - 1;
+
+    if (nextIndex !== null) {
+      e.preventDefault();
+      setActiveIndex(nextIndex);
+      barButtonsRef.current[nextIndex]?.focus();
+    }
+  };
 
   return (
     <section
@@ -34,18 +50,18 @@ export function SmogTimelineChart({ hourly, cleanestWindow }: SmogTimelineChartP
     >
       <div className="flex flex-col gap-3 border-b border-slate-100 pb-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <h3 className="font-display text-base font-semibold text-slate-900">
+          <h2 className="font-display text-base font-semibold text-slate-900">
             24-Hour PM2.5 &amp; Smog Dispersion Curve
-          </h3>
+          </h2>
           <p className="mt-1 text-sm text-slate-600">
-            Inspect hourly particulate levels to time errands and brief cross-ventilation. Cleanest window:{' '}
+            Inspect hourly particulate levels (use arrow keys or hover) to time errands and brief
+            cross-ventilation. Cleanest window:{' '}
             <span className="font-mono font-semibold text-teal-800 tabular-nums">
               {cleanestWindow.startHour}–{cleanestWindow.endHour}
             </span>
           </p>
         </div>
 
-        {/* Live keyboard/hover readout */}
         <div
           aria-live="polite"
           className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-700 font-mono tabular-nums"
@@ -53,25 +69,24 @@ export function SmogTimelineChart({ hourly, cleanestWindow }: SmogTimelineChartP
           <span>
             <strong className="font-semibold text-slate-900">{activePoint.hourLabel}</strong>
           </span>
-          <span aria-hidden="true" className="text-slate-300">·</span>
+          <span aria-hidden="true" className="text-slate-400">·</span>
           <span>PM2.5: {activePoint.pm25} µg/m³</span>
-          <span aria-hidden="true" className="text-slate-300">·</span>
+          <span aria-hidden="true" className="text-slate-400">·</span>
           <span>US AQI: {activePoint.usAqi} ({activeClass.level})</span>
-          <span aria-hidden="true" className="text-slate-300">·</span>
+          <span aria-hidden="true" className="text-slate-400">·</span>
           <span>Wind: {activePoint.windSpeedKmh} km/h</span>
-          <span aria-hidden="true" className="text-slate-300">·</span>
+          <span aria-hidden="true" className="text-slate-400">·</span>
           <span>{activePoint.temperatureC}°C</span>
         </div>
       </div>
 
-      {/* Interactive animated bar chart */}
       <div className="mt-5">
         <div
           role="list"
           aria-label="Hourly PM2.5 readings"
           className="grid grid-cols-12 gap-1.5 sm:grid-cols-[repeat(24,minmax(0,1fr))] sm:gap-1 items-end h-36 pt-4"
         >
-          {hourly.slice(0, 24).map((point, index) => {
+          {visibleHours.map((point, index) => {
             const heightPct = Math.max(12, Math.round((point.pm25 / maxPm25) * 100));
             const aqiMeta = classifyAqi(point.usAqi);
             const isSelected = index === activeIndex;
@@ -81,10 +96,14 @@ export function SmogTimelineChart({ hourly, cleanestWindow }: SmogTimelineChartP
             return (
               <div key={point.timeIso} role="listitem" className="flex h-full flex-col items-center justify-end">
                 <button
+                  ref={(el) => {
+                    barButtonsRef.current[index] = el;
+                  }}
                   type="button"
                   onMouseEnter={() => setActiveIndex(index)}
                   onFocus={() => setActiveIndex(index)}
                   onClick={() => setActiveIndex(index)}
+                  onKeyDown={(e) => handleBarKeyDown(e, index)}
                   aria-label={`${point.hourLabel}: PM2.5 ${point.pm25} micrograms per cubic meter, AQI ${point.usAqi}, ${aqiMeta.level}`}
                   aria-pressed={isSelected}
                   className={`group relative flex w-full items-end justify-center rounded-t transition-transform duration-150 focus-visible:ring-2 focus-visible:ring-teal-700 ${
@@ -106,7 +125,7 @@ export function SmogTimelineChart({ hourly, cleanestWindow }: SmogTimelineChartP
                     }`}
                   />
                 </button>
-                <span className="mt-2 text-[10px] font-mono text-slate-500 tabular-nums">
+                <span className="mt-2 text-[10px] font-mono text-slate-600 tabular-nums">
                   {index % 4 === 0 ? point.hourLabel.slice(0, 2) : ''}
                 </span>
               </div>
@@ -116,7 +135,7 @@ export function SmogTimelineChart({ hourly, cleanestWindow }: SmogTimelineChartP
 
         <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-1 text-xs text-slate-600">
           <span>WHO 24h PM2.5 guideline: 15 µg/m³</span>
-          <span aria-hidden="true" className="text-slate-300">·</span>
+          <span aria-hidden="true" className="text-slate-400">·</span>
           <span className="inline-flex items-center gap-1.5">
             <span className="inline-block h-2.5 w-2.5 rounded-xs bg-teal-700" aria-hidden="true" />
             Highlighted cleanest 2h window
